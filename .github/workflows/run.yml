@@ -1,0 +1,43 @@
+name: Dunder Mifflin League — trading round
+
+on:
+  schedule:
+    # Every 15 minutes. GitHub cron is in UTC; interval schedules don't care about timezone.
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {}   # lets you trigger a round by hand from the Actions tab
+
+# Allow the job to commit the updated state.json back to the repo.
+permissions:
+  contents: write
+
+# If a run is still going when the next one fires, let the new one wait rather than overlap.
+concurrency:
+  group: trading-round
+  cancel-in-progress: false
+
+jobs:
+  round:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Run one trading round
+        run: node run.cjs
+
+      - name: Commit updated standings
+        run: |
+          git config user.name  "dunder-mifflin-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add state.json
+          if git diff --cached --quiet; then
+            echo "No change in state.json — nothing to commit."
+          else
+            git commit -m "trading round $(date -u +'%Y-%m-%d %H:%M UTC')"
+            git push
+          fi
