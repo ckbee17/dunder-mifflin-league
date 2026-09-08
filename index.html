@@ -446,10 +446,14 @@ async function settleAll(st){
  });
  return n;
 }
-function markEquity(a,priceByMid){
+function markEquity(a,priceByMid,seen){
  let eq=a.cash;
- Object.values(a.positions).forEach(pos=>{ const cur=priceByMid[pos.mid];
-  if(cur!=null) eq+=pos.shares*(pos.side==='YES'? cur : 1-cur); });
+ Object.values(a.positions).forEach(pos=>{
+  let cur=priceByMid[pos.mid];                       // fresh quote from today's snapshot
+  if(cur==null && seen) cur=seen[pos.mid];           // else last price we saw for this market
+  if(cur!=null) eq+=pos.shares*(pos.side==='YES'? cur : 1-cur);
+  else eq+=pos.shares*pos.cost;                      // never quoted → hold at entry until it settles (no phantom $0)
+ });
  return Math.round(eq*100)/100;
 }
 function rollDay(st,today){
@@ -490,7 +494,7 @@ async function runRound(){
     if(Object.keys(a.positions).length>=MAX_OPEN) return;   // hard cap: 10 open positions at a time
     if(buy(a,s,side,BET_SIZE)>0) a.today_trades++; }); });
  snaps.forEach(s=>st.seen[s.id]=s.yes);
- IDS.forEach(id=>{ const a=st.agents[id], eq=markEquity(a,priceByMid);
+ IDS.forEach(id=>{ const a=st.agents[id], eq=markEquity(a,priceByMid,st.seen);
   a.equity.push(eq); if(a.equity.length>90) a.equity=a.equity.slice(-90);
   st.last_equity[id]=eq; st.records[id].peak=Math.max(st.records[id].peak,eq);
   if(st.day_start[id]==null) st.day_start[id]=eq; });

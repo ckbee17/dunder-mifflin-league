@@ -150,10 +150,14 @@ async function settleAll(st){
  });
  return n;
 }
-function markEquity(a,priceByMid){
+function markEquity(a,priceByMid,seen){
  let eq=a.cash;
- Object.values(a.positions).forEach(pos=>{ const cur=priceByMid[pos.mid];
-  if(cur!=null) eq+=pos.shares*(pos.side==='YES'? cur : 1-cur); });
+ Object.values(a.positions).forEach(pos=>{
+  let cur=priceByMid[pos.mid];                       // fresh quote from today's snapshot
+  if(cur==null && seen) cur=seen[pos.mid];           // else last price we saw for this market
+  if(cur!=null) eq+=pos.shares*(pos.side==='YES'? cur : 1-cur);
+  else eq+=pos.shares*pos.cost;                      // never quoted → hold at entry until it settles (no phantom $0)
+ });
  return Math.round(eq*100)/100;
 }
 function rollDay(st,today){
@@ -194,7 +198,7 @@ async function runRound(){
     if(Object.keys(a.positions).length>=MAX_OPEN) return;   // hard cap: 10 open positions at a time
     if(buy(a,s,side,BET_SIZE)>0) a.today_trades++; }); });
  snaps.forEach(s=>st.seen[s.id]=s.yes);
- IDS.forEach(id=>{ const a=st.agents[id], eq=markEquity(a,priceByMid);
+ IDS.forEach(id=>{ const a=st.agents[id], eq=markEquity(a,priceByMid,st.seen);
   a.equity.push(eq); if(a.equity.length>90) a.equity=a.equity.slice(-90);
   st.last_equity[id]=eq; st.records[id].peak=Math.max(st.records[id].peak,eq);
   if(st.day_start[id]==null) st.day_start[id]=eq; });
@@ -351,7 +355,27 @@ var SPR={
 var POS={ jim:[22,46], pam:[18,54], dwight:[26,55], andy:[35,45], phyllis:[33,56], stanley:[40,56],
  erin:[8.5,57], michael:[18,16], oscar:[16,77], kevin:[8.5,87], angela:[9,71],
  meredith:[22,84], creed:[29,82], darryl:[41,82], ryan:[57,66], gabe:[89,56], toby:[93,66], kelly:[92,83] };
-var ZONES={ mich:[16,31], conf:[34,37], brk:[89,25] };
+var ZONES={ mich:[20,20], conf:[64,50], brk:[89,20] };
+/* Walkable navigation graph traced from the office floor plan (percent coords).
+   Sprites route along these corridors/doorways instead of cutting across walls. */
+var NAV={
+ ml_top:[8,24],ml_mid:[10,42],ml_low:[12,60],bl:[15,80],mich:[17,16],
+ bp_nw:[22,30],bp_w:[20,52],bp_c:[31,50],bp_e:[41,50],bp_ntop:[34,20],
+ top_l:[45,14],cv_top:[45,33],cv_mid:[46,52],cv_low:[47,70],cbot:[49,84],
+ mh_l:[52,50],kitchen:[60,47],round:[66,49],mh_r:[72,51],
+ croom_w:[55,63],croom:[63,67],bath:[59,80],
+ r_top:[77,44],r_mid:[77,60],r_low:[78,76],r_bot:[76,88],
+ gabe:[87,58],kelly:[91,84],brk_dn:[83,32],brk:[89,20]
+};
+var NAV_E=[['ml_top','ml_mid'],['ml_mid','ml_low'],['ml_low','bl'],['ml_top','mich'],['mich','bp_nw'],
+ ['bp_nw','bp_w'],['ml_mid','bp_w'],['bl','bp_w'],['bp_w','bp_c'],['bp_c','bp_e'],
+ ['bp_nw','bp_ntop'],['bp_ntop','top_l'],['bp_e','cv_mid'],['cv_top','cv_mid'],['cv_mid','cv_low'],
+ ['cv_low','cbot'],['top_l','cv_top'],['cv_mid','mh_l'],['mh_l','kitchen'],['kitchen','round'],
+ ['round','mh_r'],['cv_low','croom_w'],['croom_w','croom'],['cbot','bath'],['bath','croom'],
+ ['croom','r_mid'],['mh_r','r_top'],['r_top','r_mid'],['r_mid','r_low'],['r_low','r_bot'],
+ ['r_top','brk_dn'],['brk_dn','brk'],['r_mid','gabe'],['r_low','kelly'],['r_bot','kelly'],['bath','r_bot']];
+/* Blue spare seats sprites can sit in during idle moments. */
+var SEATS=[[34,16],[40,15],[45,20],[66,63],[70,63],[10,46],[95,58],[95,82],[87,12],[92,22]];
 function buildOffice(){
  if(typeof document==='undefined'||document.getElementById('office')) return;
  var tabs=document.querySelector('.tabs');
@@ -359,31 +383,106 @@ function buildOffice(){
  var sec=document.createElement('section'); sec.id='office'; sec.hidden=true;
  sec.innerHTML='<div class="floormap" id="floormap"><div id="spriteLayer"></div>'+
   '<div id="whiteboard"><h5>STANDINGS</h5><ol id="wbList"></ol></div>'+
-  '<div class="fmhint">hover any sprite for their stats · a bot stays at its desk until a trade closes at a loss — then it’s off to Michael’s office</div></div>';
+  '<div class="fmhint">hover any sprite for their stats · they work at their desks, wander when they’re flat, gather for meetings — and trudge to Michael’s office after a losing trade</div></div>';
  var conf=document.getElementById('conf'); conf.parentNode.insertBefore(sec,conf.nextSibling);
  var fm=document.getElementById('floormap'); if(typeof FLOORPLAN!=='undefined') fm.style.backgroundImage='url('+FLOORPLAN+')';
  document.getElementById('spriteLayer').innerHTML=IDS.map(function(id){ return '<div class="sprite" id="spr-'+id+'" data-id="'+id+'">'+spriteSVG(SPR[id])+'<div class="tip"></div></div>'; }).join('');
  var wb=document.getElementById('whiteboard'); wb.style.left='52%'; wb.style.top='11%'; wb.style.width='22%';
+ OFFICE.start();
 }
 function renderOffice(R){
  if(typeof document==='undefined'||!document.getElementById('spriteLayer')) return;
- var byId={}; R.forEach(function(r){byId[r.id]=r;});
- var zi={mich:0};
- IDS.forEach(function(id){ var r=byId[id], el=document.getElementById('spr-'+id); if(!r||!el) return;
-  var pos, st2;
-  // Only leave the desk once a trade has CLOSED and the bankroll is actually down.
-  if(r.open_positions===0 && r.balance<985){ var i=zi.mich++; pos=[ZONES.mich[0]+((i%3)-1)*4.2, ZONES.mich[1]+Math.floor(i/3)*5.5]; st2='in Michael’s office · down '+signed(r.pnl); }
-  else { pos=POS[id]; st2=(r.open_positions>0? r.open_positions+' open · at their desk' : 'at their desk'); }
-  el.style.left=pos[0]+'%'; el.style.top=pos[1]+'%';
-  var rank=R.findIndex(function(x){return x.id===id;})+1;
-  el.querySelector('.tip').innerHTML='<b>'+r.name+'</b><br>'+money(r.balance)+' ('+signed(r.pnl)+') · '+st2;
-  var crown=el.querySelector('.crown');
-  if(rank===1&&!crown){ var cr=document.createElement('div'); cr.className='crown'; cr.textContent='♛'; el.appendChild(cr); }
-  else if(rank!==1&&crown){ crown.remove(); }
- });
+ // Whiteboard standings + crown live here; the OFFICE director owns sprite movement & tips.
  var wl=document.getElementById('wbList');
  if(wl) wl.innerHTML=R.slice(0,6).map(function(t,i){ return '<li class="'+(i===0?'lead':'')+'"><span>'+(i+1)+'. '+t.name.split(' ')[0]+'</span><b>'+money(t.balance)+'</b></li>'; }).join('');
+ R.forEach(function(r,i){ var el=document.getElementById('spr-'+r.id); if(!el) return;
+  var crown=el.querySelector('.crown');
+  if(i===0&&!crown){ var cr=document.createElement('div'); cr.className='crown'; cr.textContent='♛'; el.appendChild(cr); }
+  else if(i!==0&&crown){ crown.remove(); }
+ });
+ OFFICE.feed(R);
 }
+
+/* ---------- office director: subtle, life-like sprite movement ----------
+   Runs on its own browser timer so the floor feels alive between the 15-min
+   data updates. Modes (priority): all-hands meeting > walk of shame (a trade
+   just settled at a loss) > winners' huddle (a top-3 bot just booked a win) >
+   at desk (holding open trades) > idle wandering. Inert under Node (DOM-guarded). */
+var OFFICE=(function(){
+ var HOP=1150;                             // ms per corridor hop (walking speed)
+ var last=[], prevW={}, prevL={}, seeded=false, started=false;
+ var shame={}, celeb={}, sit={};           // id -> expiry ms (sit: {until,spot,tip})
+ var meetingUntil=0, nextMeeting=0;
+ var S={};                                 // id -> {x,y,route:[[x,y]..],key}
+ // adjacency
+ var ADJ={}; Object.keys(NAV).forEach(function(k){ADJ[k]=[];});
+ NAV_E.forEach(function(e){ ADJ[e[0]].push(e[1]); ADJ[e[1]].push(e[0]); });
+ function d2(a,b){ var dx=a[0]-b[0],dy=a[1]-b[1]; return dx*dx+dy*dy; }
+ function nearest(p){ var best=null,bd=1e9; for(var k in NAV){ var dd=d2(p,NAV[k]); if(dd<bd){bd=dd;best=k;} } return best; }
+ function bfs(a,b){ if(a===b) return [a]; var q=[a],prev={}; prev[a]=null;
+  while(q.length){ var n=q.shift(); var nb=ADJ[n]; for(var i=0;i<nb.length;i++){ var m=nb[i]; if(!(m in prev)){ prev[m]=n; if(m===b){ var path=[m]; while(prev[path[0]]!=null) path.unshift(prev[path[0]]); return path; } q.push(m); } } }
+  return [a,b]; }
+ function routeTo(id,dx,dy){ var s=S[id]; var sn=nearest([s.x,s.y]), en=nearest([dx,dy]);
+  var path=(sn===en)?[]:bfs(sn,en).map(function(k){return NAV[k];});
+  path.push([dx,dy]); s.route=path; }
+ // stable per-bot slot offset so a zone's occupants don't stack (doesn't change over time → no re-route thrash)
+ function slot(id,w,dx,dy){ var i=IDS.indexOf(id); return [((i%w)-(w-1)/2)*dx, Math.floor(i/w%4)*dy]; }
+ function feed(R){
+  last=R; var now=Date.now();
+  if(!seeded){ R.forEach(function(r){ prevW[r.id]=r.wins; prevL[r.id]=r.losses; }); seeded=true; return; }
+  R.forEach(function(r,idx){
+   if(r.losses>(prevL[r.id]||0)) shame[r.id]=now+110000;             // new settled loss → Michael's office ~2 min
+   if(r.wins>(prevW[r.id]||0) && idx<3) celeb[r.id]=now+45000;       // top-3 books a win → conference huddle
+   prevW[r.id]=r.wins; prevL[r.id]=r.losses;
+  });
+ }
+ function decide(){                        // choose each bot's destination + tip (every 4.5s)
+  var now=Date.now();
+  if(nextMeeting===0) nextMeeting=now+(7+Math.random()*4)*60000;
+  if(now>=nextMeeting && meetingUntil===0) meetingUntil=now+40000;   // all-hands ~40s
+  if(meetingUntil && now>meetingUntil){ meetingUntil=0; nextMeeting=now+(7+Math.random()*4)*60000; }
+  var meeting=meetingUntil && now<meetingUntil;
+  last.forEach(function(r){
+   var el=document.getElementById('spr-'+r.id); if(!el||!S[r.id]) return;
+   var key,dest,tip,o;
+   if(meeting){ key='meet'; o=slot(r.id,6,3.0,3.4); dest=[ZONES.conf[0]+o[0],ZONES.conf[1]+o[1]]; tip='all-hands meeting'; }
+   else if(shame[r.id]&&now<shame[r.id]){ key='mich'; o=slot(r.id,3,4.0,4.6); dest=[ZONES.mich[0]+o[0],ZONES.mich[1]+o[1]]; tip='in Michael’s office · '+signed(r.pnl); }
+   else if(celeb[r.id]&&now<celeb[r.id]){ key='conf'; o=slot(r.id,4,3.2,3.6); dest=[ZONES.conf[0]+o[0],ZONES.conf[1]+o[1]]; tip='conference room · '+signed(r.today_pnl)+' today'; }
+   else if(r.open_positions>0){ key='desk'; dest=POS[r.id]; tip=r.open_positions+' open · at their desk'; delete sit[r.id]; }
+   else {
+    var w=sit[r.id];
+    if(w&&now<w.until){ key=w.key; dest=w.spot; tip=w.tip; }
+    else { delete sit[r.id];
+     if(Math.random()<0.06){                                         // idle → occasional trip, then back to desk
+      var pick=Math.random();
+      if(pick<0.3){ sit[r.id]={until:now+22000,key:'brk',spot:[ZONES.brk[0]+slot(r.id,2,4.0,4.6)[0],ZONES.brk[1]+slot(r.id,2,4.0,4.6)[1]],tip:'break room'}; }
+      else if(pick<0.65){ var st=SEATS[Math.floor(Math.random()*SEATS.length)]; sit[r.id]={until:now+20000,key:'seat'+st[0]+st[1],spot:st,tip:'taking a seat'}; }
+      else { sit[r.id]={until:now+16000,key:'brk2',spot:ZONES.brk.slice(),tip:'grabbing coffee'}; }
+      key=sit[r.id].key; dest=sit[r.id].spot; tip=sit[r.id].tip;
+     } else { key='desk'; dest=POS[r.id]; tip='at their desk'; }
+    }
+   }
+   if(S[r.id].key!==key){ S[r.id].key=key; routeTo(r.id,dest[0],dest[1]); }
+   var t=el.querySelector('.tip'); if(t) t.innerHTML='<b>'+r.name+'</b><br>'+money(r.balance)+' ('+signed(r.pnl)+') · '+tip;
+  });
+ }
+ function step(){                          // advance every sprite one corridor hop
+  IDS.forEach(function(id){ var s=S[id]; if(!s||!s.route||!s.route.length) return;
+   var el=document.getElementById('spr-'+id); if(!el) return;
+   var p=s.route.shift(); s.x=p[0]; s.y=p[1];
+   el.style.transition='left '+HOP+'ms linear, top '+HOP+'ms linear';
+   el.style.left=p[0]+'%'; el.style.top=p[1]+'%';
+  });
+ }
+ function start(){
+  if(started||typeof document==='undefined') return; started=true;
+  IDS.forEach(function(id){ var el=document.getElementById('spr-'+id); if(el){ var p=POS[id]; S[id]={x:p[0],y:p[1],route:[],key:'desk'}; el.style.transition='none'; el.style.left=p[0]+'%'; el.style.top=p[1]+'%'; } });
+  setTimeout(function(){ decide(); },80);
+  setInterval(decide,4500);
+  setInterval(step,HOP);
+ }
+ return {feed:feed, tick:decide, start:start};
+})();
 
 /* ---------- open-trades side panel ---------- */
 function buildOpenPanel(){
