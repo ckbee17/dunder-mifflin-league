@@ -8,7 +8,6 @@ on:
 permissions:
   contents: write
 
-# Never run two loops at once; a backstop trigger just waits.
 concurrency:
   group: trading-loop
   cancel-in-progress: false
@@ -16,7 +15,7 @@ concurrency:
 jobs:
   loop:
     runs-on: ubuntu-latest
-    timeout-minutes: 350         # GitHub caps jobs at 6h; we loop for 5h then hand off
+    timeout-minutes: 350
     steps:
       - name: Check out the repo
         uses: actions/checkout@v4
@@ -30,7 +29,7 @@ jobs:
         run: |
           git config user.name  "dunder-mifflin-bot"
           git config user.email "actions@users.noreply.github.com"
-          END=$(( $(date +%s) + 18000 ))     # ~5 hours from now
+          END=$(( $(date +%s) + 18000 ))
           while [ "$(date +%s)" -lt "$END" ]; do
             node run.cjs || echo "round hiccup — will retry next cycle"
             git add state.json
@@ -39,7 +38,7 @@ jobs:
               git pull --rebase --autostash || true
               git push || true
             fi
-            sleep 900                          # 15 minutes
+            sleep 900
           done
 
       - name: Hand off to the next run (self-perpetuating)
