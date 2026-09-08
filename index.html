@@ -335,12 +335,12 @@ const ROSTER={
  phyllis:{prim:'value',min_p:.35,max_p:.65,max_pos:4,day_frac:.15},
  ryan:{prim:'hypenew',max_pos:2,day_frac:.30,oversize:true},
  michael:{prim:'crowd',top_volume:6,max_pos:1,day_frac:.35,oversize:true,size_mult:1.3},
- oscar:{prim:'ev',edge_min:.03,max_pos:3,day_frac:.18},
+ oscar:{prim:'ev',min_p:.6,max_spread:.03,max_pos:3,day_frac:.18},
  kevin:{prim:'naive',max_pos:3,day_frac:.20},
  angela:{prim:'nearcert',min_p:.95,max_pos:2,day_frac:.06},
  creed:{prim:'random',max_pos:3,day_frac:.20},
  meredith:{prim:'longshot',max_p:.12,max_pos:1,day_frac:.30,oversize:true},
- kelly:{prim:'crowd',tags:['culture','mention','pop','celebrity','entertainment','music','award'],top_volume:40,max_pos:3,day_frac:.18},
+ kelly:{prim:'crowd',top_volume:40,max_pos:3,day_frac:.18},
  gabe:{prim:'favorite',min_p:.80,top_volume:15,max_pos:4,day_frac:.15},
  darryl:{prim:'value',min_p:.25,max_p:.6,max_pos:3,day_frac:.18},
  erin:{prim:'favorite',tags:['sport','soccer','nfl','nba','weather','epl','game','win','vs'],min_p:.75,max_pos:2,day_frac:.12},
@@ -396,7 +396,7 @@ function score(prim,s,side,cfg){
   case 'meanrev': return (Math.abs(s.change)>(cfg.min_chg||.05)&&chg<0)? -chg : -1;
   case 'crowd': return ((side==='YES'&&p>=.5)||(side==='NO'&&p>.5))? s.vol : -1;
   case 'hypenew': return (isnew(s)&&side==='YES')? s.vol : -1;
-  case 'ev': { const fair=Math.min(.99,Math.max(.01,p+.02*(p>.5?1:-1))); const e=fair-ask_of(s,side); return e>(cfg.edge_min||.03)? e : -1; }
+  case 'ev': { const cost=ask_of(s,side); return (p>=(cfg.min_p||.6) && (p-cost)>=-(cfg.max_spread||.03))? p : -1; }  // disciplined: favored side, tight spread (low vig)
   case 'value': return (p>=(cfg.min_p||.25)&&p<=(cfg.max_p||.6))? (1-p)/p : -1;
   case 'naive': return (side==='YES'&&p<=.5)? (1-p) : -1;
   case 'random': return Math.random();
@@ -432,7 +432,7 @@ async function settleAll(st){
  Object.values(st.agents).forEach(a=>Object.values(a.positions).forEach(p=>mids.add(p.mid)));
  const resolved={};
  for(const mid of mids){
-  try{ const arr=await fetchJSON(GAMMA+'?condition_ids='+encodeURIComponent(mid)); const m=arr&&arr[0];
+  try{ const arr=await fetchJSON(GAMMA+'?closed=true&condition_ids='+encodeURIComponent(mid)); const m=arr&&arr[0];
     if(m&&m.closed){ const op=jload(m.outcomePrices,null); if(op) resolved[mid]=(+op[0]>=0.5); } }catch(e){}
  }
  let n=0;

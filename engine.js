@@ -39,12 +39,12 @@ const ROSTER={
  phyllis:{prim:'value',min_p:.35,max_p:.65,max_pos:4,day_frac:.15},
  ryan:{prim:'hypenew',max_pos:2,day_frac:.30,oversize:true},
  michael:{prim:'crowd',top_volume:6,max_pos:1,day_frac:.35,oversize:true,size_mult:1.3},
- oscar:{prim:'ev',edge_min:.03,max_pos:3,day_frac:.18},
+ oscar:{prim:'ev',min_p:.6,max_spread:.03,max_pos:3,day_frac:.18},
  kevin:{prim:'naive',max_pos:3,day_frac:.20},
  angela:{prim:'nearcert',min_p:.95,max_pos:2,day_frac:.06},
  creed:{prim:'random',max_pos:3,day_frac:.20},
  meredith:{prim:'longshot',max_p:.12,max_pos:1,day_frac:.30,oversize:true},
- kelly:{prim:'crowd',tags:['culture','mention','pop','celebrity','entertainment','music','award'],top_volume:40,max_pos:3,day_frac:.18},
+ kelly:{prim:'crowd',top_volume:40,max_pos:3,day_frac:.18},
  gabe:{prim:'favorite',min_p:.80,top_volume:15,max_pos:4,day_frac:.15},
  darryl:{prim:'value',min_p:.25,max_p:.6,max_pos:3,day_frac:.18},
  erin:{prim:'favorite',tags:['sport','soccer','nfl','nba','weather','epl','game','win','vs'],min_p:.75,max_pos:2,day_frac:.12},
@@ -100,7 +100,7 @@ function score(prim,s,side,cfg){
   case 'meanrev': return (Math.abs(s.change)>(cfg.min_chg||.05)&&chg<0)? -chg : -1;
   case 'crowd': return ((side==='YES'&&p>=.5)||(side==='NO'&&p>.5))? s.vol : -1;
   case 'hypenew': return (isnew(s)&&side==='YES')? s.vol : -1;
-  case 'ev': { const fair=Math.min(.99,Math.max(.01,p+.02*(p>.5?1:-1))); const e=fair-ask_of(s,side); return e>(cfg.edge_min||.03)? e : -1; }
+  case 'ev': { const cost=ask_of(s,side); return (p>=(cfg.min_p||.6) && (p-cost)>=-(cfg.max_spread||.03))? p : -1; }  // disciplined: favored side, tight spread (low vig)
   case 'value': return (p>=(cfg.min_p||.25)&&p<=(cfg.max_p||.6))? (1-p)/p : -1;
   case 'naive': return (side==='YES'&&p<=.5)? (1-p) : -1;
   case 'random': return Math.random();
@@ -136,7 +136,7 @@ async function settleAll(st){
  Object.values(st.agents).forEach(a=>Object.values(a.positions).forEach(p=>mids.add(p.mid)));
  const resolved={};
  for(const mid of mids){
-  try{ const arr=await fetchJSON(GAMMA+'?condition_ids='+encodeURIComponent(mid)); const m=arr&&arr[0];
+  try{ const arr=await fetchJSON(GAMMA+'?closed=true&condition_ids='+encodeURIComponent(mid)); const m=arr&&arr[0];
     if(m&&m.closed){ const op=jload(m.outcomePrices,null); if(op) resolved[mid]=(+op[0]>=0.5); } }catch(e){}
  }
  let n=0;
@@ -356,26 +356,10 @@ var POS={ jim:[22,46], pam:[18,54], dwight:[26,55], andy:[35,45], phyllis:[33,56
  erin:[8.5,57], michael:[18,16], oscar:[16,77], kevin:[8.5,87], angela:[9,71],
  meredith:[22,84], creed:[29,82], darryl:[41,82], ryan:[57,66], gabe:[89,56], toby:[93,66], kelly:[92,83] };
 var ZONES={ mich:[20,20], conf:[64,50], brk:[89,20] };
-/* Walkable navigation graph traced from the office floor plan (percent coords).
-   Sprites route along these corridors/doorways instead of cutting across walls. */
-var NAV={
- ml_top:[8,24],ml_mid:[10,42],ml_low:[12,60],bl:[15,80],mich:[17,16],
- bp_nw:[22,30],bp_w:[20,52],bp_c:[31,50],bp_e:[41,50],bp_ntop:[34,20],
- top_l:[45,14],cv_top:[45,33],cv_mid:[46,52],cv_low:[47,70],cbot:[49,84],
- mh_l:[52,50],kitchen:[60,47],round:[66,49],mh_r:[72,51],
- croom_w:[55,63],croom:[63,67],bath:[59,80],
- r_top:[77,44],r_mid:[77,60],r_low:[78,76],r_bot:[76,88],
- gabe:[87,58],kelly:[91,84],brk_dn:[83,32],brk:[89,20]
-};
-var NAV_E=[['ml_top','ml_mid'],['ml_mid','ml_low'],['ml_low','bl'],['ml_top','mich'],['mich','bp_nw'],
- ['bp_nw','bp_w'],['ml_mid','bp_w'],['bl','bp_w'],['bp_w','bp_c'],['bp_c','bp_e'],
- ['bp_nw','bp_ntop'],['bp_ntop','top_l'],['bp_e','cv_mid'],['cv_top','cv_mid'],['cv_mid','cv_low'],
- ['cv_low','cbot'],['top_l','cv_top'],['cv_mid','mh_l'],['mh_l','kitchen'],['kitchen','round'],
- ['round','mh_r'],['cv_low','croom_w'],['croom_w','croom'],['cbot','bath'],['bath','croom'],
- ['croom','r_mid'],['mh_r','r_top'],['r_top','r_mid'],['r_mid','r_low'],['r_low','r_bot'],
- ['r_top','brk_dn'],['brk_dn','brk'],['r_mid','gabe'],['r_low','kelly'],['r_bot','kelly'],['bath','r_bot']];
-/* Blue spare seats sprites can sit in during idle moments. */
-var SEATS=[[34,16],[40,15],[45,20],[66,63],[70,63],[10,46],[95,58],[95,82],[87,12],[92,22]];
+/* Walkable mask + sit spots traced from the office floor plan (percent space).
+   Sprites pathfind (A*) only on walkable cells, so they never cross walls or desks. */
+var NAVMASK={gw:140,gh:73,b64:'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMAAAA84AAAAAlf4AAAAAAAAH4AAAf/AB/////+AABgAAAADPgBAOMYD//////8HAYAAAADx+A/jHGA/gAAAB/BwDgADwBgPwP4xxgPAAAAAPwcB4AAeAQBYD+McYHgAAAAD//AOAABgMAWB/jHHB4AAAAA//wHgAAMBAHgf4wxweAAAAAP/8B8AADAQA4H+GMcHgAAAAD/HAfAAAwOAOH/hjHBwAAAAA/xwDgAB+B//h/4ZxwcAAAAAP8cA8AAfwf/wP+GcYHAAAAAAfHAOAAB8H/8D///mBwAAAAAHxwHgAAPA//g////gcAAAAAA8OA4AADwD/4MAf/AHAAAAAAPBgOAAA8AAODAAAABwAAAAAHwf/gAAPAADgwAAAA8AAAAAB8H/4AADwAA4MAAAAfAAAAAAfAzAAAA8AAODAAAA/gAAAAAHwMAAAAPAD//8AAAfwAAAAAB8DAAAADwB///wAAH4AAAAAAfAwAAAA8B///8AAPgAAAAAAHw+AAAAd5/H///+DwAAAAAAB//4AAAOP/g////h8AAAAAAAf/+AAADA/wH////8AAAAAAA///wAAAwD8Av/+/8AAAAAAAP//+GAAMAfgB/8A/AAAAAAAD///zgADAH4AP/ADwAAAAABA////4AAwA/AB/gA8AAAAMAYP///+AAMAPwAf4AHgAAADAGD/4D/gADAB8AH/AB/B///wB4/+AP4AAwAfAB/wAf////8Af//AD8AAMAGAAf8AD/////AH//gAHAADABwAD8AA/////4D//4ABwAAwAcAAeAAP8//z//8P+AB8AAGHHAAHgAB/P/8//8D/gA/AAB//wAB4AAfj//AD8A/8AP4AAAAcAAcAAH4HBgAGAP/gH8AAAAHgAfAAD8BwAABgA/4AeAAAAA8AHwAB/A8AAAYAH+APgAAAAPAD8AB/wfAAH/4B//HwAAAADwA/AB/8PwAD//A///gAAAAA+BHxP//D8AAP/4P//4AAAAcPj///59g+AAAh+D//+AAAAH/9//+AeAPAAAAHg///gAAAB/////wHgDwAAAAwPgOwAAAAAP///4P+AcCAAAMD4DgAAAAAD///+D/4H/4AAHA+A4AAAAAA//wfh/vA//AABwPgOAAAAAAH/AH4YAwf/wAAcD4DgAAAAAB/4A+MAMP/8B//A+B4AAAAAAf8APjADj//A//wPgf+MAAAAH/AB4wA4//wD/8D4H//AAAAB/gAGMAMP/8AD/A+P//AAAAA/4ABjAHD/8AA/wPj/4AAAAAf8AAYcHwfwAAP8D4/+AAAAA/+AAADg4AAAAB/AeAfgAAAB/+AAAAAAAAAAAAAHAAAAAAA/4AAAAAAAAAAAAAAAAAAAAAP4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'};
+var SEATS=[[90.3, 12.0], [87.0, 10.2], [78.9, 10.1], [31.7, 11.2], [34.6, 12.0], [81.0, 13.3], [86.7, 14.2], [34.9, 14.8], [38.7, 15.1], [42.4, 14.9], [42.4, 18.2], [38.5, 18.7], [34.9, 19.5], [46.3, 19.2], [86.6, 20.1], [90.3, 20.1], [39.1, 22.6], [34.7, 23.4], [45.8, 23.5], [42.6, 24.0], [90.6, 26.9], [86.5, 26.4], [45.9, 27.5], [76.8, 29.3], [84.1, 30.5], [83.9, 33.7], [76.7, 34.2], [92.9, 43.4], [18.8, 44.2], [65.9, 48.1], [69.3, 48.3], [69.3, 52.6], [66.1, 53.5], [83.4, 56.6], [36.4, 73.4], [68.2, 75.2], [65.0, 75.5], [91.8, 86.0]];
 function buildOffice(){
  if(typeof document==='undefined'||document.getElementById('office')) return;
  var tabs=document.querySelector('.tabs');
@@ -409,23 +393,60 @@ function renderOffice(R){
    just settled at a loss) > winners' huddle (a top-3 bot just booked a win) >
    at desk (holding open trades) > idle wandering. Inert under Node (DOM-guarded). */
 var OFFICE=(function(){
- var HOP=1150;                             // ms per corridor hop (walking speed)
+ var SPEED=95;                             // ms per 1% travelled (walking speed)
  var last=[], prevW={}, prevL={}, seeded=false, started=false;
  var shame={}, celeb={}, sit={};           // id -> expiry ms (sit: {until,spot,tip})
  var meetingUntil=0, nextMeeting=0;
- var S={};                                 // id -> {x,y,route:[[x,y]..],key}
- // adjacency
- var ADJ={}; Object.keys(NAV).forEach(function(k){ADJ[k]=[];});
- NAV_E.forEach(function(e){ ADJ[e[0]].push(e[1]); ADJ[e[1]].push(e[0]); });
- function d2(a,b){ var dx=a[0]-b[0],dy=a[1]-b[1]; return dx*dx+dy*dy; }
- function nearest(p){ var best=null,bd=1e9; for(var k in NAV){ var dd=d2(p,NAV[k]); if(dd<bd){bd=dd;best=k;} } return best; }
- function bfs(a,b){ if(a===b) return [a]; var q=[a],prev={}; prev[a]=null;
-  while(q.length){ var n=q.shift(); var nb=ADJ[n]; for(var i=0;i<nb.length;i++){ var m=nb[i]; if(!(m in prev)){ prev[m]=n; if(m===b){ var path=[m]; while(prev[path[0]]!=null) path.unshift(prev[path[0]]); return path; } q.push(m); } } }
-  return [a,b]; }
- function routeTo(id,dx,dy){ var s=S[id]; var sn=nearest([s.x,s.y]), en=nearest([dx,dy]);
-  var path=(sn===en)?[]:bfs(sn,en).map(function(k){return NAV[k];});
-  path.push([dx,dy]); s.route=path; }
- // stable per-bot slot offset so a zone's occupants don't stack (doesn't change over time → no re-route thrash)
+ var S={};                                 // id -> {x,y,route:[[x,y]..],key,moving,timer}
+ /* ---- walkable grid (decoded from NAVMASK) + A* pathfinding ---- */
+ var GW=NAVMASK.gw, GH=NAVMASK.gh, BITS=null;
+ function decode(){ var raw=(typeof atob!=='undefined')?atob(NAVMASK.b64):Buffer.from(NAVMASK.b64,'base64').toString('binary');
+  BITS=new Uint8Array(raw.length); for(var i=0;i<raw.length;i++) BITS[i]=raw.charCodeAt(i); }
+ function walk(cx,cy){ if(cx<0||cy<0||cx>=GW||cy>=GH) return false; var i=cy*GW+cx; return (BITS[i>>3]>>(7-(i&7)))&1; }
+ function cX(x){ var c=Math.floor(x/100*GW); return c<0?0:(c>=GW?GW-1:c); }
+ function cY(y){ var c=Math.floor(y/100*GH); return c<0?0:(c>=GH?GH-1:c); }
+ function pctX(cx){ return (cx+0.5)/GW*100; }
+ function pctY(cy){ return (cy+0.5)/GH*100; }
+ function nearestWalk(cx,cy){ if(walk(cx,cy)) return [cx,cy];
+  for(var r=1;r<20;r++){ for(var dy=-r;dy<=r;dy++){ for(var dx=-r;dx<=r;dx++){ if(Math.max(Math.abs(dx),Math.abs(dy))!==r) continue;
+   if(walk(cx+dx,cy+dy)) return [cx+dx,cy+dy]; } } } return null; }
+ function lineOK(a,b){                     // Bresenham: every cell on the segment walkable
+  var x0=a[0],y0=a[1],x1=b[0],y1=b[1], dx=Math.abs(x1-x0),dy=Math.abs(y1-y0), sx=x0<x1?1:-1, sy=y0<y1?1:-1, err=dx-dy;
+  while(true){ if(!walk(x0,y0)) return false; if(x0===x1&&y0===y1) break; var e2=2*err; if(e2>-dy){err-=dy;x0+=sx;} if(e2<dx){err+=dx;y0+=sy;} } return true; }
+ var SQ2=Math.SQRT2;
+ function astar(s,g){                      // cells [cx,cy] -> array of cells or null
+  var N=GW*GH, gs=new Float32Array(N), came=new Int32Array(N), open=[], inO=new Uint8Array(N), closed=new Uint8Array(N);
+  for(var i=0;i<N;i++){ gs[i]=1e9; came[i]=-1; }
+  var si=s[1]*GW+s[0], gi=g[1]*GW+g[0]; gs[si]=0;
+  function h(ci){ var x=ci%GW,y=(ci-x)/GW, ax=Math.abs(x-g[0]),ay=Math.abs(y-g[1]); return (ax+ay)+(SQ2-2)*Math.min(ax,ay); }
+  function push(ci){ open.push(ci); inO[ci]=1; var c=open.length-1;
+   while(c>0){ var p=(c-1)>>1; if((gs[open[p]]+h(open[p]))<=(gs[open[c]]+h(open[c]))) break; var t=open[p];open[p]=open[c];open[c]=t; c=p; } }
+  function pop(){ var top=open[0], last2=open.pop(); inO[top]=0; if(open.length){ open[0]=last2; var c=0;
+   while(true){ var l=2*c+1,r=l+1,m=c; if(l<open.length&&(gs[open[l]]+h(open[l]))<(gs[open[m]]+h(open[m])))m=l; if(r<open.length&&(gs[open[r]]+h(open[r]))<(gs[open[m]]+h(open[m])))m=r; if(m===c)break; var t=open[m];open[m]=open[c];open[c]=t; c=m; } } return top; }
+  push(si);
+  while(open.length){ var ci=pop(); if(ci===gi){ var path=[],k=gi; while(k!==-1){ path.unshift([k%GW,(k-k%GW)/GW]); k=came[k]; } return path; }
+   closed[ci]=1; var cx=ci%GW, cy=(ci-cx)/GW;
+   for(var dyy=-1;dyy<=1;dyy++){ for(var dxx=-1;dxx<=1;dxx++){ if(!dxx&&!dyy) continue; var nx=cx+dxx,ny=cy+dyy; if(!walk(nx,ny)) continue;
+    if(dxx&&dyy){ if(!walk(cx+dxx,cy)||!walk(cx,cy+dyy)) continue; }        // no corner-cutting
+    var ni=ny*GW+nx; if(closed[ni]) continue; var ng=gs[ci]+((dxx&&dyy)?SQ2:1);
+    if(ng<gs[ni]){ gs[ni]=ng; came[ni]=ci; if(!inO[ni]) push(ni); } } } }
+  return null; }
+ function routeBetween(from,to){           // -> array of [x%,y%] waypoints ending at `to`
+  if(!BITS) decode();
+  var sc=nearestWalk(cX(from[0]),cY(from[1])), gc=nearestWalk(cX(to[0]),cY(to[1]));
+  if(!sc||!gc) return [to];
+  var cells=astar(sc,gc); if(!cells||!cells.length) return [to];
+  var simp=[cells[0]], i=0;                // string-pull: keep only cells with clear line-of-sight turns
+  while(i<cells.length-1){ var j=cells.length-1; while(j>i+1 && !lineOK(cells[i],cells[j])) j--; simp.push(cells[j]); i=j; }
+  var pts=simp.map(function(c){ return [pctX(c[0]),pctY(c[1])]; });
+  pts.push([to[0],to[1]]);                 // final short hop onto the desk/seat itself
+  return pts; }
+ function walkStep(id){ var s=S[id]; var el=document.getElementById('spr-'+id); if(!s||!el){ if(s)s.moving=false; return; }
+  if(!s.route||!s.route.length){ s.moving=false; return; } s.moving=true;
+  var p=s.route.shift(), dx=p[0]-s.x, dy=p[1]-s.y, dist=Math.sqrt(dx*dx+dy*dy), dur=Math.max(200,Math.min(2400,dist*SPEED));
+  s.x=p[0]; s.y=p[1]; el.style.transition='left '+dur+'ms linear, top '+dur+'ms linear'; el.style.left=p[0]+'%'; el.style.top=p[1]+'%';
+  clearTimeout(s.timer); s.timer=setTimeout(function(){ walkStep(id); }, dur+25); }
+ function goTo(id,dx,dy){ var s=S[id]; s.route=routeBetween([s.x,s.y],[dx,dy]); if(!s.moving) walkStep(id); }
  function slot(id,w,dx,dy){ var i=IDS.indexOf(id); return [((i%w)-(w-1)/2)*dx, Math.floor(i/w%4)*dy]; }
  function feed(R){
   last=R; var now=Date.now();
@@ -456,30 +477,21 @@ var OFFICE=(function(){
      if(Math.random()<0.06){                                         // idle → occasional trip, then back to desk
       var pick=Math.random();
       if(pick<0.3){ sit[r.id]={until:now+22000,key:'brk',spot:[ZONES.brk[0]+slot(r.id,2,4.0,4.6)[0],ZONES.brk[1]+slot(r.id,2,4.0,4.6)[1]],tip:'break room'}; }
-      else if(pick<0.65){ var st=SEATS[Math.floor(Math.random()*SEATS.length)]; sit[r.id]={until:now+20000,key:'seat'+st[0]+st[1],spot:st,tip:'taking a seat'}; }
-      else { sit[r.id]={until:now+16000,key:'brk2',spot:ZONES.brk.slice(),tip:'grabbing coffee'}; }
+      else if(pick<0.7){ var st=SEATS[Math.floor(Math.random()*SEATS.length)]; sit[r.id]={until:now+20000,key:'seat'+st[0]+'_'+st[1],spot:st,tip:'taking a seat'}; }
+      else { sit[r.id]={until:now+16000,key:'coffee',spot:ZONES.brk.slice(),tip:'grabbing coffee'}; }
       key=sit[r.id].key; dest=sit[r.id].spot; tip=sit[r.id].tip;
      } else { key='desk'; dest=POS[r.id]; tip='at their desk'; }
     }
    }
-   if(S[r.id].key!==key){ S[r.id].key=key; routeTo(r.id,dest[0],dest[1]); }
+   if(S[r.id].key!==key){ S[r.id].key=key; goTo(r.id,dest[0],dest[1]); }
    var t=el.querySelector('.tip'); if(t) t.innerHTML='<b>'+r.name+'</b><br>'+money(r.balance)+' ('+signed(r.pnl)+') · '+tip;
   });
  }
- function step(){                          // advance every sprite one corridor hop
-  IDS.forEach(function(id){ var s=S[id]; if(!s||!s.route||!s.route.length) return;
-   var el=document.getElementById('spr-'+id); if(!el) return;
-   var p=s.route.shift(); s.x=p[0]; s.y=p[1];
-   el.style.transition='left '+HOP+'ms linear, top '+HOP+'ms linear';
-   el.style.left=p[0]+'%'; el.style.top=p[1]+'%';
-  });
- }
  function start(){
-  if(started||typeof document==='undefined') return; started=true;
-  IDS.forEach(function(id){ var el=document.getElementById('spr-'+id); if(el){ var p=POS[id]; S[id]={x:p[0],y:p[1],route:[],key:'desk'}; el.style.transition='none'; el.style.left=p[0]+'%'; el.style.top=p[1]+'%'; } });
+  if(started||typeof document==='undefined') return; started=true; decode();
+  IDS.forEach(function(id){ var el=document.getElementById('spr-'+id); if(el){ var p=POS[id]; S[id]={x:p[0],y:p[1],route:[],key:'desk',moving:false,timer:null}; el.style.transition='none'; el.style.left=p[0]+'%'; el.style.top=p[1]+'%'; } });
   setTimeout(function(){ decide(); },80);
   setInterval(decide,4500);
-  setInterval(step,HOP);
  }
  return {feed:feed, tick:decide, start:start};
 })();
