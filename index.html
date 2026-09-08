@@ -694,6 +694,13 @@ var OFFICE=(function(){
  var shame={}, celeb={}, sit={};           // id -> expiry ms (sit: {until,spot,tip})
  var meetingUntil=0, nextMeeting=0;
  var S={};                                 // id -> {x,y,route:[[x,y]..],key,moving,timer}
+ /* ---- social behavior: hangout spots, friendships, genders, room caps ---- */
+ var SPOT={ mich:ZONES.mich, doff:[45,83], erin:[12,56], brk:ZONES.brk, brk2:[66,64], bbath:[57,84], gbath:[67,84] };
+ var PAIR={ ryan:'kelly',kelly:'ryan', jim:'pam',pam:'jim', dwight:'angela',angela:'dwight', andy:'darryl',darryl:'andy' };
+ var HANG={ jim:'brk2',pam:'brk2', dwight:'brk2',angela:'brk2', ryan:'brk',kelly:'brk', andy:'doff',darryl:'doff' };
+ var GENDER={ jim:'m',dwight:'m',pam:'f',andy:'m',stanley:'m',phyllis:'f',ryan:'m',michael:'m',oscar:'m',kevin:'m',angela:'f',creed:'m',meredith:'f',kelly:'f',gabe:'m',darryl:'m',erin:'f',toby:'m' };
+ var CAP={ mich:2,doff:2,erin:2,bbath:2,gbath:2 };   // max occupants at a time (bathrooms gender-gated separately)
+ function cap(s){ return s.charAt(0).toUpperCase()+s.slice(1); }
  /* ---- walkable grid (decoded from NAVMASK) + A* pathfinding ---- */
  var GW=NAVMASK.gw, GH=NAVMASK.gh, BITS=null;
  function decode(){ var raw=(typeof atob!=='undefined')?atob(NAVMASK.b64):Buffer.from(NAVMASK.b64,'base64').toString('binary');
@@ -759,23 +766,41 @@ var OFFICE=(function(){
   if(now>=nextMeeting && meetingUntil===0) meetingUntil=now+40000;   // all-hands ~40s
   if(meetingUntil && now>meetingUntil){ meetingUntil=0; nextMeeting=now+(7+Math.random()*4)*60000; }
   var meeting=meetingUntil && now<meetingUntil;
+  // availability to socialize + how full each capped room is
+  var idleOf={}, occ={};
+  last.forEach(function(r){ idleOf[r.id]=(r.open_positions===0)&&!(shame[r.id]&&now<shame[r.id])&&!(celeb[r.id]&&now<celeb[r.id]); });
+  IDS.forEach(function(id){ var w=sit[id]; if(w&&now<w.until&&w.place&&CAP[w.place]) occ[w.place]=(occ[w.place]||0)+1; });
+  last.forEach(function(r){ if(shame[r.id]&&now<shame[r.id]) occ.mich=(occ.mich||0)+1; });  // losers count toward Michael's cap
+  function free(pl){ return !CAP[pl] || (occ[pl]||0)<CAP[pl]; }
+  function take(pl){ if(CAP[pl]) occ[pl]=(occ[pl]||0)+1; }
   last.forEach(function(r){
    var el=document.getElementById('spr-'+r.id); if(!el||!S[r.id]) return;
    var key,dest,tip,o;
    if(meeting){ key='meet'; o=slot(r.id,6,3.0,3.4); dest=[ZONES.conf[0]+o[0],ZONES.conf[1]+o[1]]; tip='all-hands meeting'; }
-   else if(shame[r.id]&&now<shame[r.id]){ key='mich'; o=slot(r.id,3,4.0,4.6); dest=[ZONES.mich[0]+o[0],ZONES.mich[1]+o[1]]; tip='in Michael’s office · '+signed(r.pnl); }
+   else if(shame[r.id]&&now<shame[r.id]){ key='mich'; o=slot(r.id,2,4.2,4.6); dest=[ZONES.mich[0]+o[0],ZONES.mich[1]+o[1]]; tip='in Michael’s office · '+signed(r.pnl); }
    else if(celeb[r.id]&&now<celeb[r.id]){ key='conf'; o=slot(r.id,4,3.2,3.6); dest=[ZONES.conf[0]+o[0],ZONES.conf[1]+o[1]]; tip='conference room · '+signed(r.today_pnl)+' today'; }
    else if(r.open_positions>0){ key='desk'; dest=POS[r.id]; tip=r.open_positions+' open · at their desk'; delete sit[r.id]; }
    else {
     var w=sit[r.id];
     if(w&&now<w.until){ key=w.key; dest=w.spot; tip=w.tip; }
     else { delete sit[r.id];
-     if(Math.random()<0.06){                                         // idle → occasional trip, then back to desk
-      var pick=Math.random();
-      if(pick<0.3){ sit[r.id]={until:now+22000,key:'brk',spot:[ZONES.brk[0]+slot(r.id,2,4.0,4.6)[0],ZONES.brk[1]+slot(r.id,2,4.0,4.6)[1]],tip:'break room'}; }
-      else if(pick<0.7){ var st=SEATS[Math.floor(Math.random()*SEATS.length)]; sit[r.id]={until:now+20000,key:'seat'+st[0]+'_'+st[1],spot:st,tip:'taking a seat'}; }
-      else { sit[r.id]={until:now+16000,key:'coffee',spot:ZONES.brk.slice(),tip:'grabbing coffee'}; }
-      key=sit[r.id].key; dest=sit[r.id].spot; tip=sit[r.id].tip;
+     var buddy=PAIR[r.id], choice=null, ctip='';
+     // one-sided affinities: Andy → Michael & Erin, Gabe → Erin
+     if(r.id==='andy'){ if(free('mich')&&Math.random()<0.28){ choice='mich'; ctip='bugging Michael'; }
+       else if(free('erin')&&Math.random()<0.40){ choice='erin'; ctip='chatting up Erin'; } }
+     else if(r.id==='gabe'){ if(free('erin')&&Math.random()<0.38){ choice='erin'; ctip='chatting up Erin'; } }
+     // best-friend hangout when both are free
+     if(!choice && buddy && idleOf[buddy] && Math.random()<0.70){ choice=HANG[r.id]; ctip='hanging with '+cap(buddy); }
+     // otherwise a general idle option
+     if(!choice){ var rr=Math.random();
+      if(rr<0.12 && free('mich')){ choice='mich'; ctip='in Michael’s office'; }
+      else if(rr<0.24 && free('doff')){ choice='doff'; ctip='over at Darryl’s'; }
+      else if(rr<0.34){ var g=(GENDER[r.id]==='f')?'gbath':'bbath'; if(free(g)){ choice=g; ctip='bathroom break'; } }
+      else if(rr<0.58){ choice=(Math.random()<0.5?'brk':'brk2'); ctip='break room'; }
+     }
+     if(choice){ var pt=SPOT[choice]; o=slot(r.id,3,4.0,4.6);
+      sit[r.id]={until:now+(20000+Math.random()*16000), key:'at_'+choice, place:choice, spot:[pt[0]+o[0],pt[1]+o[1]], tip:ctip};
+      take(choice); key=sit[r.id].key; dest=sit[r.id].spot; tip=ctip;
      } else { key='desk'; dest=POS[r.id]; tip='at their desk'; }
     }
    }
