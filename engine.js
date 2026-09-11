@@ -22,7 +22,7 @@ const META=[
  {id:'angela',name:'Angela Martin',role:'Accounting',strat:'Small, conservative, by-the-book',quote:"Small, safe, and settled by five. I do not gamble."},
  {id:'creed',name:'Creed Bratton',role:'Quality Assurance',strat:'Erratic and unknowable — no discernible system',quote:"I've been trading since before money. Or after it. Unclear."},
  {id:'meredith',name:'Meredith Palmer',role:'Supplier Relations',strat:'YOLO all-in on the longshot',quote:"All of it. On the longshot. What is the worst that could happen."},
- {id:'kelly',name:'Kelly Kapoor',role:'Customer Service',strat:'Pop & entertainment markets only',quote:"Is it about a celebrity? No? Then honestly I do not care."},
+ {id:'kelly',name:'Kelly Kapoor',role:'Customer Service',strat:'Follows the buzz — piles into whatever’s trending',quote:"If everyone’s obsessed with it, I’m in. That’s just good business."},
  {id:'gabe',name:'Gabe Lewis',role:'Sabre Liaison',strat:'Corporate/index plays — aggregate favorites',quote:"I prefer broad aggregate exposure. It's about synergy."},
  {id:'darryl',name:'Darryl Philbin',role:'Warehouse → Office',strat:'Value per contract — best payout ratio',quote:"Cheapest good contract on the board. That's the whole game."},
  {id:'erin',name:'Erin Hannon',role:'Reception',strat:'Cautious favorites in familiar categories',quote:"I just bet on stuff I get! Fingers and toes crossed!"},
@@ -51,6 +51,20 @@ const ROSTER={
  toby:{prim:'nearcert',min_p:.96,max_pos:1,day_frac:.05},
 };
 const IDS=Object.keys(ROSTER);
+/* ---- The Warehouse (2nd tier): a washed-out bot restarts at $1,000 with its
+   strategy REVERSED, and earns reinstatement to the main league at +$500 ($1,500). ---- */
+const REVERSE={
+ favorite:{prim:'longshot',max_p:.15}, nearcert:{prim:'longshot',max_p:.08}, longshot:{prim:'favorite',min_p:.85},
+ momentum:{prim:'meanrev',min_chg:.03}, meanrev:{prim:'momentum',min_chg:.03}, crowd:{prim:'fade'},
+ hypenew:{prim:'favorite',min_p:.80}, ev:{prim:'longshot',max_p:.20}, value:{prim:'favorite',min_p:.80},
+ naive:{prim:'favorite',min_p:.50}, random:{prim:'random'}
+};
+const REVLABEL={
+ favorite:'Now fades the favorite — hunts underdogs', nearcert:'Now chases longshots', longshot:'Now backs safe favorites',
+ momentum:'Now fades the move', meanrev:'Now rides the momentum', crowd:'Now fades the crowd',
+ hypenew:'Now ignores the hype, backs favorites', ev:'Now gambles on longshots', value:'Now buys the chalk',
+ naive:'Now backs the favorite (does the math right!)', random:'Still gloriously, unreversibly random'
+};
 
 /* ---------- helpers ---------- */
 function jload(v,d){ if(typeof v!=='string') return (v==null?d:v); try{return JSON.parse(v);}catch(e){return d;} }
@@ -62,12 +76,12 @@ async function fetchJSON(url){ const r=await fetch(url,{headers:{Accept:'applica
 /* ---------- state ---------- */
 function freshState(){
  const agents={}, records={};
- IDS.forEach(k=>{ agents[k]={cash:START,positions:{},realized:0,fees:0,trades:0,wins:0,losses:0,equity:[START],today_trades:0,log:[],day_spent:0};
+ IDS.forEach(k=>{ agents[k]={cash:START,positions:{},realized:0,fees:0,trades:0,wins:0,losses:0,equity:[START],today_trades:0,log:[],day_spent:0,tier:'main',flip:false};
    records[k]={daily:[],days_led:0,best_day:0,worst_day:0,brier_sum:0,brier_n:0,streak:0,peak:START}; });
  return {agents,records,seen:{},runs:0,last_run:null,start_date:etToday(),day:null,day_start:{},last_equity:{}};
 }
 function loadState(){
- try{ const s=JSON.parse(globalThis.localStorage.getItem(KEY)); if(s&&s.agents){ IDS.forEach(k=>{ if(!s.records[k]) s.records[k]={daily:[],days_led:0,best_day:0,worst_day:0,brier_sum:0,brier_n:0,streak:0,peak:START}; if(s.agents[k]&&!s.agents[k].log) s.agents[k].log=[]; if(s.agents[k]&&s.agents[k].day_spent==null) s.agents[k].day_spent=0; }); return s; } }catch(e){}
+ try{ const s=JSON.parse(globalThis.localStorage.getItem(KEY)); if(s&&s.agents){ IDS.forEach(k=>{ if(!s.records[k]) s.records[k]={daily:[],days_led:0,best_day:0,worst_day:0,brier_sum:0,brier_n:0,streak:0,peak:START}; if(s.agents[k]&&!s.agents[k].log) s.agents[k].log=[]; if(s.agents[k]&&s.agents[k].day_spent==null) s.agents[k].day_spent=0; if(s.agents[k]&&!s.agents[k].tier) s.agents[k].tier='main'; if(s.agents[k]&&s.agents[k].flip==null) s.agents[k].flip=false; }); return s; } }catch(e){}
  return freshState();
 }
 function saveState(st){ try{ globalThis.localStorage.setItem(KEY,JSON.stringify(st)); }catch(e){} }
@@ -103,12 +117,13 @@ function score(prim,s,side,cfg){
   case 'ev': { const cost=ask_of(s,side); return (p>=(cfg.min_p||.6) && (p-cost)>=-(cfg.max_spread||.03))? p : -1; }  // disciplined: favored side, tight spread (low vig)
   case 'value': return (p>=(cfg.min_p||.25)&&p<=(cfg.max_p||.6))? (1-p)/p : -1;
   case 'naive': return (side==='YES'&&p<=.5)? (1-p) : -1;
+  case 'fade': return (p<.5)? s.vol : -1;          // reverse of 'crowd' — backs the underdog side
   case 'random': return Math.random();
  }
  return -1;
 }
-function decide(id,snaps){
- const cfg=ROSTER[id]; let pool=snaps;
+function decide(id,snaps,flip){
+ const base=ROSTER[id]; const cfg=flip? Object.assign({},base,REVERSE[base.prim]||{}) : base; let pool=snaps;
  if(cfg.tags) pool=pool.filter(s=>cfg.tags.some(t=>s.text.indexOf(t)>=0));
  if(cfg.top_volume) pool=pool.slice().sort((a,b)=>b.vol-a.vol).slice(0,cfg.top_volume);
  const cands=[];
@@ -192,7 +207,7 @@ async function runRound(){
  const snaps=raw.map(m=>snapshot(m,st.seen)).filter(Boolean); LAST_SNAPS=snaps;
  const priceByMid={}; snaps.forEach(s=>priceByMid[s.id]=s.yes);
  IDS.forEach(id=>{ const a=st.agents[id]; a.today_trades=0;
-  const picks=decide(id,snaps); if(!picks.length) return;
+  const picks=decide(id,snaps,a.flip); if(!picks.length) return;
   picks.forEach(pr=>{ const s=pr[0], side=pr[1], key=s.id+'|'+side;
     if(key in a.positions) return;                          // already holding this market — one $25 bet each
     if(Object.keys(a.positions).length>=MAX_OPEN) return;   // hard cap: 10 open positions at a time
@@ -202,6 +217,18 @@ async function runRound(){
   a.equity.push(eq); if(a.equity.length>90) a.equity=a.equity.slice(-90);
   st.last_equity[id]=eq; st.records[id].peak=Math.max(st.records[id].peak,eq);
   if(st.day_start[id]==null) st.day_start[id]=eq; });
+ // ---- The Warehouse: relegate the bankrupt, promote the redeemed ----
+ st.events=st.events||[];
+ IDS.forEach(id=>{ const a=st.agents[id]; const eq=st.last_equity[id];
+  if(a.tier!=='warehouse' && a.cash<1.06 && Object.keys(a.positions).length===0){        // too broke to place any bet → sent down, strategy flips
+   a.tier='warehouse'; a.flip=!a.flip; a.cash=START; a.positions={}; a.equity=[START]; a.day_spent=0; a.relegated_run=st.runs;
+   st.last_equity[id]=START; st.day_start[id]=START;
+   st.events.unshift({t:Date.now(),k:'down',id:id,run:st.runs});
+  } else if(a.tier==='warehouse' && eq>=START+500){                                       // won back $500 → reinstated, keeps flipped strat + stats
+   a.tier='main'; a.reinstated_run=st.runs;
+   st.events.unshift({t:Date.now(),k:'up',id:id,run:st.runs});
+  } });
+ if(st.events.length>40) st.events=st.events.slice(0,40);
  st.runs++; st.last_run=new Date().toISOString();
  st.markets=snaps.slice(0,20).map(function(s){return {id:s.id,yes:s.yes,q:s.q,vol:s.vol};});
  saveState(st);
@@ -221,7 +248,7 @@ function rows(st){
    tradesToday:a.today_trades,position:(function(){const p=Object.values(a.positions)[0];return p?p.side+' · '+p.q.slice(0,30):'flat';})(),
    equity:a.equity.slice(),open_positions:Object.keys(a.positions).length,fees:Math.round(a.fees*100)/100,
    days_led:r.days_led,calibration:r.brier_n>=3?Math.round(r.brier_sum/r.brier_n*1000)/1000:null,
-   avg:settled?(bal-START)/settled:0}; });
+   avg:settled?(bal-START)/settled:0,tier:a.tier||'main',flip:!!a.flip,revlabel:REVLABEL[(ROSTER[id]||{}).prim]||''}; });
 }
 
 /* ---------- rendering ---------- */
@@ -307,8 +334,9 @@ function renderFeed(R){
 }
 function render(st,priceByMid,snaps){
  const R=rows(st).sort((a,b)=>b.balance-a.balance);
+ const Rmain=R.filter(t=>t.tier!=='warehouse'), Rwh=R.filter(t=>t.tier==='warehouse');
  const dEl=document.getElementById('day'); if(dEl){ const dn=Math.round((new Date(etToday())-new Date(st.start_date))/864e5)+1; dEl.textContent=dn>0?dn:1; }
- renderSpot(R); renderGrid(R); renderMarq(R); renderConf(R); renderFeed(R); renderOffice(R); renderOpenTrades();
+ renderSpot(Rmain); renderGrid(Rmain); renderMarq(Rmain); renderConf(Rmain); renderFeed(Rmain); renderOffice(R,Rmain); renderOpenTrades(); renderWarehouse(Rwh);
  if(snaps&&snaps.length) renderMarkets(snaps); else if(LAST_SNAPS.length) renderMarkets(LAST_SNAPS);
 }
 
@@ -354,7 +382,7 @@ var SPR={
 };
 var POS={ jim:[22,46], pam:[18,54], dwight:[26,55], andy:[35,45], phyllis:[33,56], stanley:[40,56],
  erin:[8.5,57], michael:[18,16], oscar:[16,77], kevin:[8.5,87], angela:[9,71],
- meredith:[22,84], creed:[29,82], darryl:[41,82], ryan:[57,66], gabe:[89,56], toby:[93,66], kelly:[92,83] };
+ meredith:[22,84], creed:[33.6,82], darryl:[41,82], ryan:[57,66], gabe:[89,56], toby:[93,66], kelly:[92,83] };
 var ZONES={ mich:[20,20], conf:[64,50], brk:[89,20] };
 /* Walkable mask + sit spots traced from the office floor plan (percent space).
    Sprites pathfind (A*) only on walkable cells, so they never cross walls or desks. */
@@ -374,17 +402,54 @@ function buildOffice(){
  var wb=document.getElementById('whiteboard'); wb.style.left='52%'; wb.style.top='11%'; wb.style.width='22%';
  OFFICE.start();
 }
-function renderOffice(R){
+function buildWarehouse(){
+ if(typeof document==='undefined'||document.getElementById('warehouse')) return;
+ var tabs=document.querySelector('.tabs');
+ if(tabs){ var b=document.createElement('button'); b.className='tab'; b.setAttribute('data-tab','warehouse'); b.textContent='The Warehouse'; tabs.appendChild(b); }
+ var sec=document.createElement('section'); sec.id='warehouse'; sec.hidden=true;
+ sec.innerHTML='<div class="whhead"><h3>THE WAREHOUSE</h3><p>Wash out of the main league and you land here: a fresh $1,000, your strategy flipped upside-down. Win back $500 (reach $1,500) and you’re reinstated upstairs — flipped strategy and all.</p></div><div id="whgrid" class="grid"></div>';
+ var anchor=document.getElementById('office')||document.getElementById('conf');
+ anchor.parentNode.insertBefore(sec, anchor.nextSibling);
+ if(!document.getElementById('whcss')){ var st=document.createElement('style'); st.id='whcss';
+  st.textContent='.whhead{margin:2px 0 12px}.whhead h3{margin:0 0 4px;font-family:var(--disp,inherit);font-size:20px;letter-spacing:.6px;color:#eaf1fb}.whhead p{margin:0;font-size:13px;color:#aebccb;max-width:640px}'+
+   '.card.wh .strat.rev{color:#b0402e;font-style:italic}'+
+   '.whpromo{grid-column:1/-1;margin-top:8px;padding-top:8px;border-top:1px dashed var(--paperline)}'+
+   '.whbar{height:7px;border-radius:4px;background:var(--paper2,#eee);overflow:hidden;border:1px solid var(--paperline)}'+
+   '.whbar span{display:block;height:100%;background:linear-gradient(90deg,#c9a227,#3ddc84)}'+
+   '.whlbl{margin-top:4px;font-family:var(--mono,monospace);font-size:11.5px;color:var(--faint)}'+
+   '.whempty{padding:26px;text-align:center;color:var(--faint);font-size:14px}';
+  document.head.appendChild(st); }
+}
+function renderOffice(R,Rmain){
  if(typeof document==='undefined'||!document.getElementById('spriteLayer')) return;
- // Whiteboard standings + crown live here; the OFFICE director owns sprite movement & tips.
+ Rmain=Rmain||R;
+ // Whiteboard standings + crown reflect the MAIN league; the director moves every sprite.
  var wl=document.getElementById('wbList');
- if(wl) wl.innerHTML=R.slice(0,6).map(function(t,i){ return '<li class="'+(i===0?'lead':'')+'"><span>'+(i+1)+'. '+t.name.split(' ')[0]+'</span><b>'+money(t.balance)+'</b></li>'; }).join('');
- R.forEach(function(r,i){ var el=document.getElementById('spr-'+r.id); if(!el) return;
+ if(wl) wl.innerHTML=Rmain.slice(0,6).map(function(t,i){ return '<li class="'+(i===0?'lead':'')+'"><span>'+(i+1)+'. '+t.name.split(' ')[0]+'</span><b>'+money(t.balance)+'</b></li>'; }).join('');
+ var leader=Rmain[0]?Rmain[0].id:null;
+ R.forEach(function(r){ var el=document.getElementById('spr-'+r.id); if(!el) return;
   var crown=el.querySelector('.crown');
-  if(i===0&&!crown){ var cr=document.createElement('div'); cr.className='crown'; cr.textContent='♛'; el.appendChild(cr); }
-  else if(i!==0&&crown){ crown.remove(); }
+  if(r.id===leader&&!crown){ var cr=document.createElement('div'); cr.className='crown'; cr.textContent='♛'; el.appendChild(cr); }
+  else if(r.id!==leader&&crown){ crown.remove(); }
  });
  OFFICE.feed(R);
+}
+function renderWarehouse(R){
+ if(typeof document==='undefined') return;
+ var el=document.getElementById('whgrid'); if(!el) return;
+ if(!R||!R.length){ el.innerHTML='<div class="whempty">The warehouse is empty — nobody’s washed out yet. Give it time.</div>'; return; }
+ el.innerHTML=R.map(function(t){ var settled=t.wins+t.losses;
+  var prog=Math.max(0,Math.min(100,Math.round((t.balance-START)/500*100)));   // 0 → $1,000 start, 100 → $1,500 promotion
+  return '<div class="card wh'+(t.id===selected?' sel':'')+'" data-id="'+t.id+'">'+
+   '<div class="pf"><img src="'+img(t.id)+'" alt=""></div>'+
+   '<div class="meta"><div class="nm">'+t.name+'</div><div class="role">'+t.role+'</div><div class="strat rev">'+(t.revlabel||'Flipped strategy')+'</div></div>'+
+   '<div>'+spark(t.equity,150,44)+'</div>'+
+   '<div class="figs"><div class="bal">'+money(t.balance)+'</div>'+
+     '<span class="pnl '+(t.pnl>=0?'g':'l')+'">'+signed(t.pnl)+'</span>'+
+     '<div class="wr">'+(settled?t.winRate+'% W':'no bets settled')+' · '+t.wins+'-'+t.losses+'</div></div>'+
+   '<div class="whpromo"><div class="whbar"><span style="width:'+prog+'%"></span></div>'+
+     '<div class="whlbl">'+(t.balance>=START+500?'✔ ready for reinstatement':'to reinstatement: '+money(Math.max(0,START+500-t.balance))+' to go')+'</div></div>'+
+   '</div>'; }).join('');
 }
 
 /* ---------- office director: subtle, life-like sprite movement ----------
@@ -398,6 +463,13 @@ var OFFICE=(function(){
  var shame={}, celeb={}, sit={};           // id -> expiry ms (sit: {until,spot,tip})
  var meetingUntil=0, nextMeeting=0;
  var S={};                                 // id -> {x,y,route:[[x,y]..],key,moving,timer}
+ /* ---- social behavior: hangout spots, friendships, genders, room caps ---- */
+ var SPOT={ mich:ZONES.mich, doff:[45,83], erin:[12,56], brk:ZONES.brk, brk2:[66,64], bbath:[57,84], gbath:[67,84] };
+ var PAIR={ ryan:'kelly',kelly:'ryan', jim:'pam',pam:'jim', dwight:'angela',angela:'dwight', andy:'darryl',darryl:'andy' };
+ var HANG={ jim:'brk2',pam:'brk2', dwight:'brk2',angela:'brk2', ryan:'brk',kelly:'brk', andy:'doff',darryl:'doff' };
+ var GENDER={ jim:'m',dwight:'m',pam:'f',andy:'m',stanley:'m',phyllis:'f',ryan:'m',michael:'m',oscar:'m',kevin:'m',angela:'f',creed:'m',meredith:'f',kelly:'f',gabe:'m',darryl:'m',erin:'f',toby:'m' };
+ var CAP={ mich:2,doff:2,erin:2,bbath:2,gbath:2 };   // max occupants at a time (bathrooms gender-gated separately)
+ function cap(s){ return s.charAt(0).toUpperCase()+s.slice(1); }
  /* ---- walkable grid (decoded from NAVMASK) + A* pathfinding ---- */
  var GW=NAVMASK.gw, GH=NAVMASK.gh, BITS=null;
  function decode(){ var raw=(typeof atob!=='undefined')?atob(NAVMASK.b64):Buffer.from(NAVMASK.b64,'base64').toString('binary');
@@ -463,23 +535,41 @@ var OFFICE=(function(){
   if(now>=nextMeeting && meetingUntil===0) meetingUntil=now+40000;   // all-hands ~40s
   if(meetingUntil && now>meetingUntil){ meetingUntil=0; nextMeeting=now+(7+Math.random()*4)*60000; }
   var meeting=meetingUntil && now<meetingUntil;
+  // availability to socialize + how full each capped room is
+  var idleOf={}, occ={};
+  last.forEach(function(r){ idleOf[r.id]=(r.open_positions===0)&&!(shame[r.id]&&now<shame[r.id])&&!(celeb[r.id]&&now<celeb[r.id]); });
+  IDS.forEach(function(id){ var w=sit[id]; if(w&&now<w.until&&w.place&&CAP[w.place]) occ[w.place]=(occ[w.place]||0)+1; });
+  last.forEach(function(r){ if(shame[r.id]&&now<shame[r.id]) occ.mich=(occ.mich||0)+1; });  // losers count toward Michael's cap
+  function free(pl){ return !CAP[pl] || (occ[pl]||0)<CAP[pl]; }
+  function take(pl){ if(CAP[pl]) occ[pl]=(occ[pl]||0)+1; }
   last.forEach(function(r){
    var el=document.getElementById('spr-'+r.id); if(!el||!S[r.id]) return;
    var key,dest,tip,o;
    if(meeting){ key='meet'; o=slot(r.id,6,3.0,3.4); dest=[ZONES.conf[0]+o[0],ZONES.conf[1]+o[1]]; tip='all-hands meeting'; }
-   else if(shame[r.id]&&now<shame[r.id]){ key='mich'; o=slot(r.id,3,4.0,4.6); dest=[ZONES.mich[0]+o[0],ZONES.mich[1]+o[1]]; tip='in Michael’s office · '+signed(r.pnl); }
+   else if(shame[r.id]&&now<shame[r.id]){ key='mich'; o=slot(r.id,2,4.2,4.6); dest=[ZONES.mich[0]+o[0],ZONES.mich[1]+o[1]]; tip='in Michael’s office · '+signed(r.pnl); }
    else if(celeb[r.id]&&now<celeb[r.id]){ key='conf'; o=slot(r.id,4,3.2,3.6); dest=[ZONES.conf[0]+o[0],ZONES.conf[1]+o[1]]; tip='conference room · '+signed(r.today_pnl)+' today'; }
    else if(r.open_positions>0){ key='desk'; dest=POS[r.id]; tip=r.open_positions+' open · at their desk'; delete sit[r.id]; }
    else {
     var w=sit[r.id];
     if(w&&now<w.until){ key=w.key; dest=w.spot; tip=w.tip; }
     else { delete sit[r.id];
-     if(Math.random()<0.06){                                         // idle → occasional trip, then back to desk
-      var pick=Math.random();
-      if(pick<0.3){ sit[r.id]={until:now+22000,key:'brk',spot:[ZONES.brk[0]+slot(r.id,2,4.0,4.6)[0],ZONES.brk[1]+slot(r.id,2,4.0,4.6)[1]],tip:'break room'}; }
-      else if(pick<0.7){ var st=SEATS[Math.floor(Math.random()*SEATS.length)]; sit[r.id]={until:now+20000,key:'seat'+st[0]+'_'+st[1],spot:st,tip:'taking a seat'}; }
-      else { sit[r.id]={until:now+16000,key:'coffee',spot:ZONES.brk.slice(),tip:'grabbing coffee'}; }
-      key=sit[r.id].key; dest=sit[r.id].spot; tip=sit[r.id].tip;
+     var buddy=PAIR[r.id], choice=null, ctip='';
+     // one-sided affinities: Andy → Michael & Erin, Gabe → Erin
+     if(r.id==='andy'){ if(free('mich')&&Math.random()<0.28){ choice='mich'; ctip='bugging Michael'; }
+       else if(free('erin')&&Math.random()<0.40){ choice='erin'; ctip='chatting up Erin'; } }
+     else if(r.id==='gabe'){ if(free('erin')&&Math.random()<0.38){ choice='erin'; ctip='chatting up Erin'; } }
+     // best-friend hangout when both are free
+     if(!choice && buddy && idleOf[buddy] && Math.random()<0.70){ choice=HANG[r.id]; ctip='hanging with '+cap(buddy); }
+     // otherwise a general idle option
+     if(!choice){ var rr=Math.random();
+      if(rr<0.12 && free('mich')){ choice='mich'; ctip='in Michael’s office'; }
+      else if(rr<0.24 && free('doff')){ choice='doff'; ctip='over at Darryl’s'; }
+      else if(rr<0.34){ var g=(GENDER[r.id]==='f')?'gbath':'bbath'; if(free(g)){ choice=g; ctip='bathroom break'; } }
+      else if(rr<0.58){ choice=(Math.random()<0.5?'brk':'brk2'); ctip='break room'; }
+     }
+     if(choice){ var pt=SPOT[choice]; o=slot(r.id,3,4.0,4.6);
+      sit[r.id]={until:now+(20000+Math.random()*16000), key:'at_'+choice, place:choice, spot:[pt[0]+o[0],pt[1]+o[1]], tip:ctip};
+      take(choice); key=sit[r.id].key; dest=sit[r.id].spot; tip=ctip;
      } else { key='desk'; dest=POS[r.id]; tip='at their desk'; }
     }
    }
@@ -594,7 +684,7 @@ function buildControls(){
  var tabsEl=document.querySelector('.tabs');
  if(tabsEl) tabsEl.addEventListener('click',function(e){ var btn=e.target.closest&&e.target.closest('.tab'); if(!btn) return;
    document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active')); btn.classList.add('active');
-   var t=btn.dataset.tab; ['bullpen','conf','office'].forEach(function(id){ var el=document.getElementById(id); if(el) el.hidden=(id!==t); });
+   var t=btn.dataset.tab; ['bullpen','conf','office','warehouse'].forEach(function(id){ var el=document.getElementById(id); if(el) el.hidden=(id!==t); });
    render(loadState(),{},LAST_SNAPS); });
  setInterval(fmtCountdown,1000);
 }
@@ -604,7 +694,7 @@ function init(){
  // swap demo badge for our live badge
  const badge=document.querySelector('.hud .demo'); if(badge){ badge.id='liveBadge'; badge.classList.remove('blink'); badge.textContent='● LIVE'; badge.style.background='#2f8f5b'; badge.style.color='#eafff2'; badge.style.borderColor='#256f47'; }
  buildControls();
- buildOffice();
+  buildOffice(); buildWarehouse();
  buildOpenPanel();
  render(loadState(),{},[]);              // show saved state immediately
  start();                                // auto-run on open
@@ -614,7 +704,7 @@ function wireInteractions(){
  var tabsEl=document.querySelector('.tabs');
  if(tabsEl) tabsEl.addEventListener('click',function(e){ var btn=e.target.closest&&e.target.closest('.tab'); if(!btn) return;
    document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active')); btn.classList.add('active');
-   var t=btn.dataset.tab; ['bullpen','conf','office'].forEach(function(id){ var el=document.getElementById(id); if(el) el.hidden=(id!==t); });
+   var t=btn.dataset.tab; ['bullpen','conf','office','warehouse'].forEach(function(id){ var el=document.getElementById(id); if(el) el.hidden=(id!==t); });
    render(loadState(),{},LAST_SNAPS); });
  document.addEventListener('click',function(e){ var c=e.target.closest&&e.target.closest('#grid .card[data-id], .sprite[data-id], .otrow[data-id]'); if(c){ selected=c.dataset.id; render(loadState(),{},LAST_SNAPS); openTrades(c.dataset.id); } });
 }
@@ -633,7 +723,7 @@ function clock(){ if(typeof document==='undefined') return; var c=document.getEl
 function initViewer(){
  if(typeof document==='undefined') return;
  var badge=document.querySelector('.hud .demo'); if(badge){ badge.id='liveBadge'; badge.classList.remove('blink'); badge.textContent='● LIVE'; badge.style.background='#2f8f5b'; badge.style.color='#eafff2'; badge.style.borderColor='#256f47'; }
- buildOffice(); buildOpenPanel(); buildModal(); wireInteractions();
+ buildOffice(); buildWarehouse(); buildOpenPanel(); buildModal(); wireInteractions();
  fetchState(); setInterval(fetchState,60000);
  clock(); setInterval(clock,1000);
 }
