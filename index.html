@@ -301,18 +301,18 @@ var FLOORPLAN="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAMCAgMCAg
    ========================================================================== */
 (function(){
 "use strict";
-const START=1000, BET_SIZE=25, MAX_OPEN=10, CONTEST_DAYS=30, KEY="dmpl_v1";
+const START=1000, BET_SIZE=50, MIN_BET=10, MAX_OPEN=10, CONTEST_DAYS=30, KEY="dmpl_v1";
 const GAMMA="https://gamma-api.polymarket.com/markets";
 
 const META=[
- {id:'jim',name:'Jim Halpert',role:'Sales',strat:'Laid-back contrarian — fades the favorite',quote:"Everyone's piling into the same side. So, naturally, I'm out."},
- {id:'dwight',name:'Dwight Schrute',role:'Asst. Regional Manager',strat:'Always backs the safe high-probability favorite',quote:"The favorite wins because the favorite is correct. Question nothing."},
+ {id:'jim',name:'Jim Halpert',role:'Sales',strat:'The closer — bets big on the sure thing',quote:"You don't force the sale. You close the one that's already yours."},
+ {id:'dwight',name:'Dwight Schrute',role:'Asst. Regional Manager',strat:'Momentum hawk — the strong get stronger',quote:"The trend is correct because the trend is winning. Ride it. Question nothing."},
  {id:'pam',name:'Pam Beesly',role:'Reception → Sales',strat:'Cautious mean-reversion — fades overreactions',quote:"I keep it small and stick to the markets I actually get."},
  {id:'andy',name:'Andy Bernard',role:'Sales',strat:'Follow-the-leader momentum — copies whoever is hot',quote:"Whoever's up, that's my play. Big tuna."},
  {id:'stanley',name:'Stanley Hubbard',role:'Sales',strat:'Near-certain favorites, closed by five',quote:"Nine to five. Not one minute past. It's Pretzel Day, anyway."},
- {id:'phyllis',name:'Phyllis Vance',role:'Sales',strat:'Market maker — works the mid-priced spread',quote:"I post both sides and collect the spread. Patience, dear."},
+ {id:'phyllis',name:'Phyllis Vance',role:'Sales',strat:'Quietly works the mid-priced value',quote:"I'm patient. The value comes to those who wait, dear."},
  {id:'ryan',name:'Ryan Howard',role:'Sales (the temp)',strat:'Chases the newest hot markets — big and fast',quote:"I only move on what's about to blow up. I see the future."},
- {id:'michael',name:'Michael Scott',role:'Regional Manager',strat:'Big confident bets, zero research, pure whim',quote:"I'm not superstitious. But I am a little stitious."},
+ {id:'michael',name:'Michael Scott',role:'Regional Manager',strat:'Contrarian genius — bets against the crowd',quote:"Everyone's wrong but me. That's not arrogance, it's just facts I feel."},
  {id:'oscar',name:'Oscar Martinez',role:'Accounting',strat:'Fair-value EV plays — always shows the math',quote:"I ran the expected value. The math is not up for debate."},
  {id:'kevin',name:'Kevin Malone',role:'Accounting',strat:'Bets the obvious markets — does the math wrong',quote:"Number go up. I like when the number go up."},
  {id:'angela',name:'Angela Martin',role:'Accounting',strat:'Small, conservative, by-the-book',quote:"Small, safe, and settled by five. I do not gamble."},
@@ -327,14 +327,14 @@ const META=[
 const METABY={}; META.forEach(m=>METABY[m.id]=m);
 
 const ROSTER={
- jim:{prim:'favorite',min_p:.90,max_pos:3,day_frac:.20},
+ jim:{prim:'favorite',min_p:.90,max_pos:3,day_frac:.20,size_mult:2},   // the closer — bets big on sure things
  dwight:{prim:'momentum',min_chg:.03,max_pos:2,day_frac:.25},
  pam:{prim:'meanrev',min_chg:.05,max_pos:3,day_frac:.12},
  andy:{prim:'crowd',top_volume:20,max_pos:3,day_frac:.18},
  stanley:{prim:'nearcert',min_p:.93,max_pos:2,day_frac:.10},
  phyllis:{prim:'value',min_p:.35,max_p:.65,max_pos:4,day_frac:.15},
  ryan:{prim:'hypenew',max_pos:2,day_frac:.30,oversize:true},
- michael:{prim:'crowd',top_volume:6,max_pos:1,day_frac:.35,oversize:true,size_mult:1.3},
+ michael:{prim:'fade',max_pos:2,day_frac:.30,size_mult:1.5},   // contrarian "genius" — bets against the crowd, big
  oscar:{prim:'ev',min_p:.6,max_spread:.03,max_pos:3,day_frac:.18},
  kevin:{prim:'naive',max_pos:3,day_frac:.20},
  angela:{prim:'nearcert',min_p:.95,max_pos:2,day_frac:.06},
@@ -431,7 +431,7 @@ function decide(id,snaps,flip){
 
 /* ---------- portfolio ---------- */
 function buy(a,s,side,budget){
- budget=Math.min(budget,a.cash*0.95); if(budget<1) return 0;
+ budget=Math.min(budget,a.cash*0.95); if(budget<MIN_BET) return 0;   // no dollar-dust bets — skip if can't place a real one
  const p=ask_of(s,side), slip=Math.min(0.5*budget/Math.max(s.liq,1),0.15), fp=Math.min(0.99,p*(1+slip));
  const f=fee(s,fp,budget/fp), shares=(budget-f)/fp;
  a.cash-=budget; a.fees+=f; a.trades++;
@@ -505,9 +505,9 @@ async function runRound(){
  IDS.forEach(id=>{ const a=st.agents[id]; a.today_trades=0;
   const picks=decide(id,snaps,a.flip); if(!picks.length) return;
   picks.forEach(pr=>{ const s=pr[0], side=pr[1], key=s.id+'|'+side;
-    if(key in a.positions) return;                          // already holding this market — one $25 bet each
+    if(key in a.positions) return;                          // already holding this market — one bet per market
     if(Object.keys(a.positions).length>=MAX_OPEN) return;   // hard cap: 10 open positions at a time
-    if(buy(a,s,side,BET_SIZE)>0) a.today_trades++; }); });
+    if(buy(a,s,side,BET_SIZE*((ROSTER[id]||{}).size_mult||1))>0) a.today_trades++; }); });
  snaps.forEach(s=>st.seen[s.id]=s.yes);
  IDS.forEach(id=>{ const a=st.agents[id], eq=markEquity(a,priceByMid,st.seen);
   a.equity.push(eq); if(a.equity.length>90) a.equity=a.equity.slice(-90);
@@ -516,7 +516,7 @@ async function runRound(){
  // ---- The Warehouse: relegate the bankrupt, promote the redeemed ----
  st.events=st.events||[];
  IDS.forEach(id=>{ const a=st.agents[id]; const eq=st.last_equity[id];
-  if(a.tier!=='warehouse' && a.cash<1.06 && Object.keys(a.positions).length===0){        // too broke to place any bet → sent down, strategy flips
+  if(a.tier!=='warehouse' && a.cash*0.95<MIN_BET && Object.keys(a.positions).length===0){ // can't afford the minimum bet → sent down, strategy flips
    a.tier='warehouse'; a.flip=!a.flip; a.cash=START; a.positions={}; a.equity=[START]; a.day_spent=0; a.relegated_run=st.runs;
    st.last_equity[id]=START; st.day_start[id]=START;
    st.events.unshift({t:Date.now(),k:'down',id:id,run:st.runs});
@@ -1030,5 +1030,4 @@ if(typeof document!=='undefined'){ if(document.readyState!=='loading') boot(); e
 if(typeof module!=='undefined') module.exports={runRound,loadState,saveState,freshState,rows,ROSTER,IDS,snapshot,decide};
 globalThis.__DMPL={runRound,loadState,saveState,freshState,rows,snapshot,decide,ROSTER,IDS,setSnaps:function(s){LAST_SNAPS=s;},render:function(){render(loadState(),{},LAST_SNAPS);}};
 })();
-
 </script>
