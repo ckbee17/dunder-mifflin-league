@@ -372,12 +372,12 @@ async function fetchJSON(url){ const r=await fetch(url,{headers:{Accept:'applica
 /* ---------- state ---------- */
 function freshState(){
  const agents={}, records={};
- IDS.forEach(k=>{ agents[k]={cash:START,positions:{},realized:0,fees:0,trades:0,wins:0,losses:0,equity:[START],today_trades:0,log:[],day_spent:0,tier:'main',flip:false};
+ IDS.forEach(k=>{ agents[k]={cash:START,positions:{},realized:0,fees:0,trades:0,wins:0,losses:0,equity:[START],today_trades:0,log:[],day_spent:0,tier:'main',flip:false,size_mult:(ROSTER[k]&&ROSTER[k].size_mult)||1,win_tier:0};
    records[k]={daily:[],days_led:0,best_day:0,worst_day:0,brier_sum:0,brier_n:0,streak:0,peak:START}; });
  return {agents,records,seen:{},runs:0,last_run:null,start_date:etToday(),day:null,day_start:{},last_equity:{}};
 }
 function loadState(){
- try{ const s=JSON.parse(globalThis.localStorage.getItem(KEY)); if(s&&s.agents){ IDS.forEach(k=>{ if(!s.records[k]) s.records[k]={daily:[],days_led:0,best_day:0,worst_day:0,brier_sum:0,brier_n:0,streak:0,peak:START}; if(s.agents[k]&&!s.agents[k].log) s.agents[k].log=[]; if(s.agents[k]&&s.agents[k].day_spent==null) s.agents[k].day_spent=0; if(s.agents[k]&&!s.agents[k].tier) s.agents[k].tier='main'; if(s.agents[k]&&s.agents[k].flip==null) s.agents[k].flip=false; }); return s; } }catch(e){}
+ try{ const s=JSON.parse(globalThis.localStorage.getItem(KEY)); if(s&&s.agents){ IDS.forEach(k=>{ if(!s.records[k]) s.records[k]={daily:[],days_led:0,best_day:0,worst_day:0,brier_sum:0,brier_n:0,streak:0,peak:START}; if(s.agents[k]&&!s.agents[k].log) s.agents[k].log=[]; if(s.agents[k]&&s.agents[k].day_spent==null) s.agents[k].day_spent=0; if(s.agents[k]&&!s.agents[k].tier) s.agents[k].tier='main'; if(s.agents[k]&&s.agents[k].flip==null) s.agents[k].flip=false; if(s.agents[k]&&s.agents[k].size_mult==null) s.agents[k].size_mult=(ROSTER[k]&&ROSTER[k].size_mult)||1; if(s.agents[k]&&s.agents[k].win_tier==null) s.agents[k].win_tier=Math.floor((s.agents[k].wins||0)/500); }); return s; } }catch(e){}
  return freshState();
 }
 function saveState(st){ try{ globalThis.localStorage.setItem(KEY,JSON.stringify(st)); }catch(e){} }
@@ -507,14 +507,22 @@ async function runRound(){
   picks.forEach(pr=>{ const s=pr[0], side=pr[1], key=s.id+'|'+side;
     if(key in a.positions) return;                          // already holding this market — one bet per market
     if(Object.keys(a.positions).length>=MAX_OPEN) return;   // hard cap: 10 open positions at a time
-    if(buy(a,s,side,BET_SIZE*((ROSTER[id]||{}).size_mult||1))>0) a.today_trades++; }); });
+    if(buy(a,s,side,BET_SIZE*(a.size_mult||1))>0) a.today_trades++; }); });
  snaps.forEach(s=>st.seen[s.id]=s.yes);
  IDS.forEach(id=>{ const a=st.agents[id], eq=markEquity(a,priceByMid,st.seen);
   a.equity.push(eq); if(a.equity.length>90) a.equity=a.equity.slice(-90);
   st.last_equity[id]=eq; st.records[id].peak=Math.max(st.records[id].peak,eq);
   if(st.day_start[id]==null) st.day_start[id]=eq; });
- // ---- The Warehouse: relegate the bankrupt, promote the redeemed ----
+ // ---- Win-milestone promotions: cross a new 500-win mark at ≥95% win rate → bet size doubles ----
  st.events=st.events||[];
+ IDS.forEach(id=>{ const a=st.agents[id];
+  const settled=a.wins+a.losses, wr=settled? a.wins/settled : 1, cur=Math.floor((a.wins||0)/500);
+  if(a.win_tier==null) a.win_tier=cur;                       // baseline; no retroactive reward
+  if(cur>a.win_tier && wr>=0.95){                            // reached a new milestone AND holding 95%+
+   while(a.win_tier<cur){ a.size_mult=(a.size_mult||1)*2; a.win_tier++; }   // double per milestone (earned ones are kept forever)
+   st.events.unshift({t:Date.now(),k:'promo',id:id,run:st.runs,mult:a.size_mult,wins:a.wins});
+  } });
+ // ---- The Warehouse: relegate the bankrupt, promote the redeemed ----
  IDS.forEach(id=>{ const a=st.agents[id]; const eq=st.last_equity[id];
   if(a.tier!=='warehouse' && a.cash*0.95<MIN_BET && Object.keys(a.positions).length===0){ // can't afford the minimum bet → sent down, strategy flips
    a.tier='warehouse'; a.flip=!a.flip; a.cash=START; a.positions={}; a.equity=[START]; a.day_spent=0; a.relegated_run=st.runs;
@@ -544,7 +552,8 @@ function rows(st){
    tradesToday:a.today_trades,position:(function(){const p=Object.values(a.positions)[0];return p?p.side+' · '+p.q.slice(0,30):'flat';})(),
    equity:a.equity.slice(),open_positions:Object.keys(a.positions).length,fees:Math.round(a.fees*100)/100,
    days_led:r.days_led,calibration:r.brier_n>=3?Math.round(r.brier_sum/r.brier_n*1000)/1000:null,
-   avg:settled?(bal-START)/settled:0,tier:a.tier||'main',flip:!!a.flip,revlabel:REVLABEL[(ROSTER[id]||{}).prim]||''}; });
+   avg:settled?(bal-START)/settled:0,tier:a.tier||'main',flip:!!a.flip,revlabel:REVLABEL[(ROSTER[id]||{}).prim]||'',
+   betSize:Math.round(BET_SIZE*(a.size_mult||1)),sizeMult:(a.size_mult||1)}; });
 }
 
 /* ---------- rendering ---------- */
@@ -576,6 +585,7 @@ function renderGrid(R){
      '<span>Avg/bet <b class="'+(t.avg>=0?'g':'l')+'">'+signed(t.avg)+'</b></span>'+
      '<span>Total <b class="'+(t.pnl>=0?'g':'l')+'">'+signed(t.pnl)+'</b></span>'+
      '<span>Fees <b>$'+Math.round(t.fees)+'</b></span>'+
+     '<span>Bet <b'+(t.sizeMult>1?' class="g"':'')+'>$'+t.betSize+(t.sizeMult>1?' ·'+t.sizeMult+'×':'')+'</b></span>'+
      '<span>Open <b>'+t.open_positions+'</b></span></div>'+
    '</div>'; }).join('');
 }
