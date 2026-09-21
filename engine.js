@@ -13,20 +13,20 @@ const META=[
  {id:'dwight',name:'Dwight Schrute',role:'Asst. Regional Manager',strat:'Momentum hawk — the strong get stronger',quote:"The trend is correct because the trend is winning. Ride it. Question nothing."},
  {id:'pam',name:'Pam Beesly',role:'Reception → Sales',strat:'Cautious mean-reversion — fades overreactions',quote:"I keep it small and stick to the markets I actually get."},
  {id:'andy',name:'Andy Bernard',role:'Sales',strat:'Follow-the-leader momentum — copies whoever is hot',quote:"Whoever's up, that's my play. Big tuna."},
- {id:'stanley',name:'Stanley Hubbard',role:'Sales',strat:'Near-certain favorites, closed by five',quote:"Nine to five. Not one minute past. It's Pretzel Day, anyway."},
+ {id:'stanley',name:'Stanley Hubbard',role:'Sales',strat:'Near-certain favorites — proven, now doubling down',quote:"Nine to five. Not one minute past. It's Pretzel Day, anyway."},
  {id:'phyllis',name:'Phyllis Vance',role:'Sales',strat:'Quietly works the mid-priced value',quote:"I'm patient. The value comes to those who wait, dear."},
  {id:'ryan',name:'Ryan Howard',role:'Sales (the temp)',strat:'Chases the newest hot markets — big and fast',quote:"I only move on what's about to blow up. I see the future."},
  {id:'michael',name:'Michael Scott',role:'Regional Manager',strat:'Contrarian genius — bets against the crowd',quote:"Everyone's wrong but me. That's not arrogance, it's just facts I feel."},
  {id:'oscar',name:'Oscar Martinez',role:'Accounting',strat:'Fair-value EV plays — always shows the math',quote:"I ran the expected value. The math is not up for debate."},
  {id:'kevin',name:'Kevin Malone',role:'Accounting',strat:'Bets the obvious markets — does the math wrong',quote:"Number go up. I like when the number go up."},
- {id:'angela',name:'Angela Martin',role:'Accounting',strat:'Small, conservative, by-the-book',quote:"Small, safe, and settled by five. I do not gamble."},
+ {id:'angela',name:'Angela Martin',role:'Accounting',strat:'Conservative locks — flawless, so now betting bigger',quote:"Small, safe, and settled by five. I do not gamble."},
  {id:'creed',name:'Creed Bratton',role:'Quality Assurance',strat:'Erratic and unknowable — no discernible system',quote:"I've been trading since before money. Or after it. Unclear."},
  {id:'meredith',name:'Meredith Palmer',role:'Supplier Relations',strat:'YOLO all-in on the longshot',quote:"All of it. On the longshot. What is the worst that could happen."},
  {id:'kelly',name:'Kelly Kapoor',role:'Customer Service',strat:'Follows the buzz — piles into whatever’s trending',quote:"If everyone’s obsessed with it, I’m in. That’s just good business."},
  {id:'gabe',name:'Gabe Lewis',role:'Sabre Liaison',strat:'Corporate/index plays — aggregate favorites',quote:"I prefer broad aggregate exposure. It's about synergy."},
  {id:'darryl',name:'Darryl Philbin',role:'Warehouse → Office',strat:'Value per contract — best payout ratio',quote:"Cheapest good contract on the board. That's the whole game."},
  {id:'erin',name:'Erin Hannon',role:'Reception',strat:'Cautious favorites in familiar categories',quote:"I just bet on stuff I get! Fingers and toes crossed!"},
- {id:'toby',name:'Toby Flenderson',role:'Human Resources',strat:'Capital preservation — safest near-locks',quote:"The safe pick. Always the safe pick. Nobody objects to that."},
+ {id:'toby',name:'Toby Flenderson',role:'Human Resources',strat:'Safest near-locks — zero losses earned him a bigger bet',quote:"The safe pick. Always the safe pick. Nobody objects to that."},
 ];
 const METABY={}; META.forEach(m=>METABY[m.id]=m);
 
@@ -35,20 +35,20 @@ const ROSTER={
  dwight:{prim:'momentum',min_chg:.03,max_pos:2,day_frac:.25},
  pam:{prim:'meanrev',min_chg:.05,max_pos:3,day_frac:.12},
  andy:{prim:'crowd',top_volume:20,max_pos:3,day_frac:.18},
- stanley:{prim:'nearcert',min_p:.93,max_pos:2,day_frac:.10},
+ stanley:{prim:'nearcert',min_p:.93,max_pos:2,day_frac:.10,size_mult:2},   // graduated — proven, bets bigger
  phyllis:{prim:'value',min_p:.35,max_p:.65,max_pos:4,day_frac:.15},
  ryan:{prim:'hypenew',max_pos:2,day_frac:.30,oversize:true},
  michael:{prim:'fade',max_pos:2,day_frac:.30,size_mult:1.5},   // contrarian "genius" — bets against the crowd, big
  oscar:{prim:'ev',min_p:.6,max_spread:.03,max_pos:3,day_frac:.18},
  kevin:{prim:'naive',max_pos:3,day_frac:.20},
- angela:{prim:'nearcert',min_p:.95,max_pos:2,day_frac:.06},
+ angela:{prim:'nearcert',min_p:.95,max_pos:2,day_frac:.06,size_mult:2},   // graduated — spotless run, bets bigger
  creed:{prim:'random',max_pos:3,day_frac:.20},
  meredith:{prim:'longshot',max_p:.12,max_pos:1,day_frac:.30,oversize:true},
  kelly:{prim:'crowd',top_volume:40,max_pos:3,day_frac:.18},
  gabe:{prim:'favorite',min_p:.80,top_volume:15,max_pos:4,day_frac:.15},
  darryl:{prim:'value',min_p:.25,max_p:.6,max_pos:3,day_frac:.18},
  erin:{prim:'favorite',tags:['sport','soccer','nfl','nba','weather','epl','game','win','vs'],min_p:.75,max_pos:2,day_frac:.12},
- toby:{prim:'nearcert',min_p:.96,max_pos:1,day_frac:.05},
+ toby:{prim:'nearcert',min_p:.96,max_pos:1,day_frac:.05,size_mult:2},   // graduated — zero losses, bets bigger
 };
 const IDS=Object.keys(ROSTER);
 /* ---- The Warehouse (2nd tier): a washed-out bot restarts at $1,000 with its
