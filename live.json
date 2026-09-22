@@ -1,0 +1,11 @@
+{
+  "balance": 550.00,
+  "deposited": 550.00,
+  "pnl": 0,
+  "wins": 0,
+  "losses": 0,
+  "bets": 0,
+  "positions": [],
+  "updated": null,
+  "note": "Written by the trading bot after each run. See live-feed spec."
+}
