@@ -432,7 +432,8 @@ function infinitySVG(){var s='';
  return '<svg viewBox="0 0 22 31" xmlns="http://www.w3.org/2000/svg">'+s+'</svg>';}
 function fetchLive(){
  if(typeof fetch==='undefined') return;
- fetch('live.json?t='+Date.now(),{cache:'no-store'}).then(function(r){return r.json();}).then(function(j){
+ var LIVEURL='https://dunder-mifflin-league-production.up.railway.app/live.json';
+ fetch(LIVEURL+'?t='+Date.now(),{cache:'no-store'}).then(function(r){return r.json();}).then(function(j){
    LIVE=j; try{ renderInfinity(LIVE, rows(loadState()).sort(function(a,b){return b.balance-a.balance;})); }catch(e){}
  }).catch(function(e){});
 }
