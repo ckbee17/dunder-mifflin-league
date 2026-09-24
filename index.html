@@ -756,6 +756,7 @@ function buildInfinity(){
    '.inftile .v{font-size:26px;font-weight:800;margin-top:4px;font-family:var(--disp,inherit)}'+
    '.infnote{font-size:13px;color:#aebccb;background:var(--card,#fff);border:1px dashed var(--paperline,#dcd);border-radius:8px;padding:12px 14px}'+
    '.infvs{margin-top:12px;font-size:13.5px;color:#c8d4e0}'+
+   '.infpaused{background:#3a1e12;border:1px solid #c0392b;color:#ffcf5c;border-radius:8px;padding:11px 14px;margin-bottom:12px;font-weight:700;font-size:14px;text-align:center;letter-spacing:.3px}'+
    '.infquote{margin-top:10px;font-style:italic;color:#93a3b4;font-size:13px}'+
    '.sprite.inf .tip{white-space:nowrap}';
   document.head.appendChild(st); }
@@ -773,7 +774,9 @@ function renderInfinity(L,Rmain){
  var fresh; if(!L.updated){ fresh='standing by — no report yet'; }
  else { var m=Math.round((Date.now()-new Date(L.updated).getTime())/60000); fresh=(m<1?'updated just now':'updated '+m+'m ago'); }
  var pnlc=pnl>=0?'var(--gain,#1a9d5a)':'var(--loss,#c0392b)';
- var h='<div class="infgrid">'+
+ var paused=L.paused_manual||L.paused;
+ var banner=paused?('<div class="infpaused">⏸ PAUSED'+(L.paused_manual?' — manually stopped':'')+' · not placing new trades</div>'):'';
+ var h=banner+'<div class="infgrid">'+
   '<div class="inftile"><div class="k">Balance</div><div class="v">'+money(bal)+'</div></div>'+
   '<div class="inftile"><div class="k">Net P&amp;L</div><div class="v" style="color:'+pnlc+'">'+signed(pnl)+'</div></div>'+
   '<div class="inftile"><div class="k">Win rate</div><div class="v">'+(wr!=null?wr+'%':'—')+'</div></div>'+
