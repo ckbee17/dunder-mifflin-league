@@ -5,13 +5,18 @@ Pure functions. No network, no SDK, no keys. Given normalized markets + account
 state, it decides which bets to place and enforces every safety rail. This is the
 same brain as the paper league's top staff, adapted to polymarket.us contracts.
 """
-import math, datetime
+import math, datetime, os
+try:
+    from zoneinfo import ZoneInfo
+    ET = ZoneInfo("America/New_York")
+except Exception:
+    ET = None
 
 # ------------------------------- config -----------------------------------
 CFG = {
-    "min_p":          0.93,   # only back a side priced in this band (the sweet spot)
-    "max_p":          0.97,
-    "max_concurrent": 3,      # max open positions at once
+    "min_p":          0.90,   # back any favored side in this band (matches the paper staff: Jim .90 floor)
+    "max_p":          0.99,   # up to near-locks — where Stanley/Angela/Toby make their money (no artificial 97c cap)
+    "max_concurrent": 10,     # max open positions at once (matches Jim's breadth; cash buffer is the real deployment limit)
     "cash_buffer":    0.60,   # always keep >=60% of bankroll in cash
     "base_unit_pct":  0.034,  # one "unit" = 3.4% of current bankroll
     "max_pos_pct":    0.08,   # never >8% of bankroll in one position
@@ -21,9 +26,9 @@ CFG = {
     "ladder_step":    1.25,   # ... step the unit up by this factor (gentle, NOT doubling)
     "drawdown_halt":  0.85,   # halt NEW bets if bankroll < 85% of deposited
     "winrate_halt":   0.90,   # halt NEW bets if win rate < 90% (after >=20 bets)
-    "min_liquidity":  3000,   # skip thin books
-    "max_hours_out":  48,     # only near-term markets
-    "max_spread":     0.03,   # skip wide spreads
+    "min_liquidity":  float(os.environ.get("MIN_LIQUIDITY", "0")),   # env-tunable; permissive default (0 = no liquidity floor), matches Kalshi spec
+    "same_day_only":  bool(int(os.environ.get("SAME_DAY_ONLY", "0"))),  # 0 = trade any in-band market (polymarket.us has no same-day); set 1 to restrict
+    "max_spread":     float(os.environ.get("MAX_SPREAD", "1.0")),        # permissive default so paper fills happen; tighten (e.g. 0.03) via env
 }
 
 def _hours_to_end(end_iso):
@@ -36,6 +41,20 @@ def _hours_to_end(end_iso):
         return (d - datetime.datetime.now(datetime.timezone.utc)).total_seconds() / 3600.0
     except Exception:
         return 1e9
+
+def _resolves_today(end_iso):
+    """True only if the market resolves on TODAY's calendar date in ET (same-day, like the paper staff)."""
+    if not end_iso:
+        return False
+    try:
+        d = datetime.datetime.fromisoformat(str(end_iso).replace("Z", "+00:00"))
+        if d.tzinfo is None:
+            d = d.replace(tzinfo=datetime.timezone.utc)
+        if ET:
+            return d.astimezone(ET).date() == datetime.datetime.now(ET).date()
+        return d.date() == datetime.datetime.now(datetime.timezone.utc).date()
+    except Exception:
+        return False
 
 def base_unit(account):
     bankroll = account["balance"]
@@ -63,11 +82,11 @@ def _qualify(m):
     """m is a NORMALIZED market dict (see pm_us.list_markets). Returns a pick or None."""
     if not m.get("accepting_orders", True):
         return None
-    if float(m.get("liquidity", 0)) < CFG["min_liquidity"]:
+    if float(m.get("liquidity") or 0) < CFG["min_liquidity"]:
         return None
-    if _hours_to_end(m.get("end_time")) > CFG["max_hours_out"]:
+    if CFG["same_day_only"] and not _resolves_today(m.get("end_time")):
         return None
-    bid, ask = float(m.get("best_bid", 0)), float(m.get("best_ask", 1))
+    bid, ask = float(m.get("best_bid") or 0), float(m.get("best_ask") or 1)
     if abs(ask - bid) > CFG["max_spread"]:
         return None
     for side in ("YES", "NO"):
@@ -122,6 +141,6 @@ def decide(account, markets):
         held.add(c["slug"]); slots -= 1; deployable -= spend
 
     if not orders:
-        notes.append("No qualifying markets in the 0.93-0.97 band right now.")
+        notes.append("No qualifying markets in the 0.90-0.99 band right now.")
     notes.append(f"unit=${unit:.2f} | open={len(open_pos)} | placing={len(orders)}")
     return {"halt": None, "orders": orders, "notes": notes}
