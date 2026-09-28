@@ -733,6 +733,20 @@ function fetchLive(){
    LIVE=j; try{ renderInfinity(LIVE, rows(loadState()).sort(function(a,b){return b.balance-a.balance;})); }catch(e){}
  }).catch(function(e){});
 }
+// Pause control — talks to the bot's own /control endpoint. Token is entered by the
+// operator and kept ONLY in this browser (localStorage); it never appears in page source.
+function infCtrlBase(){ return 'https://dunder-mifflin-league-production.up.railway.app'; }
+function infTogglePause(){
+ var L=(typeof LIVE!=='undefined'&&LIVE)||{};
+ var action=L.paused_manual?'resume':'pause';
+ var tok; try{ tok=globalThis.localStorage.getItem('inf_ctrl_token'); }catch(e){}
+ if(!tok){ tok=prompt('Enter your Infinity control token (saved only in this browser):'); if(!tok) return; try{ globalThis.localStorage.setItem('inf_ctrl_token',tok); }catch(e){} }
+ var msg=document.getElementById('infctrlmsg'); if(msg) msg.textContent='working…';
+ fetch(infCtrlBase()+'/control?token='+encodeURIComponent(tok)+'&action='+action,{method:'POST'})
+  .then(function(r){ if(r.status===403){ try{ globalThis.localStorage.removeItem('inf_ctrl_token'); }catch(e){} if(msg) msg.textContent='token rejected — click again to re-enter it'; return null; } return r.json().catch(function(){return null;}); })
+  .then(function(d){ if(d){ if(msg) msg.textContent=(action==='pause'?'paused — open positions ride to settlement':'resumed — placing new orders again'); setTimeout(fetchLive,700); } })
+  .catch(function(e){ if(msg) msg.textContent='could not reach the bot (is it running?)'; });
+}
 function buildInfinity(){
  if(typeof document==='undefined'||document.getElementById('infinity')) return;
  var tabs=document.querySelector('.tabs');
@@ -741,9 +755,12 @@ function buildInfinity(){
  sec.innerHTML='<div class="infhead"><img class="inflogo" src="'+INFLOGO+'" alt="Dunder Mifflin Infinity">'+
    '<div class="inftt"><div class="inftitle">DUNDER MIFFLIN INFINITY <span class="inflive">● LIVE</span></div>'+
    '<p>The website joined the sales floor. Real money, trading the winning-staff playbook — the staff versus the computer.</p></div></div>'+
-   '<div id="infbody"></div>';
+   '<div id="infbody"></div>'+
+   '<div class="infctrl"><button id="infpausebtn" class="infbtn pause">⏸ Pause new orders</button>'+
+   '<span id="infctrlmsg" class="infctrlmsg">Pauses new entries; open positions ride to settlement.</span></div>';
  var anchor=document.getElementById('warehouse')||document.getElementById('office')||document.getElementById('conf');
  anchor.parentNode.insertBefore(sec, anchor.nextSibling);
+ var _pb=document.getElementById('infpausebtn'); if(_pb) _pb.onclick=infTogglePause;
  if(!document.getElementById('infcss')){ var st=document.createElement('style'); st.id='infcss';
   st.textContent='.infhead{display:flex;gap:16px;align-items:center;margin:2px 0 16px}'+
    '.inflogo{height:52px;border-radius:4px}'+
@@ -759,6 +776,10 @@ function buildInfinity(){
    '.infvs{margin-top:12px;font-size:13.5px;color:#c8d4e0}'+
    '.infpaused{background:#3a1e12;border:1px solid #c0392b;color:#ffcf5c;border-radius:8px;padding:11px 14px;margin-bottom:12px;font-weight:700;font-size:14px;text-align:center;letter-spacing:.3px}'+
    '.infquote{margin-top:10px;font-style:italic;color:#93a3b4;font-size:13px}'+
+   '.infctrl{display:flex;align-items:center;gap:12px;margin-top:16px;flex-wrap:wrap}'+
+   '.infbtn{padding:11px 18px;font-size:14px;font-weight:800;border:0;border-radius:10px;color:#fff;cursor:pointer;letter-spacing:.3px}'+
+   '.infbtn.pause{background:#c0392b}.infbtn.resume{background:#1a9d5a}'+
+   '.infctrlmsg{font-size:12.5px;color:#8fa3b8}'+
    '.sprite.inf .tip{white-space:nowrap}';
   document.head.appendChild(st); }
 }
@@ -801,6 +822,10 @@ function renderInfinity(L,Rmain){
  }
  h+='<div class="infquote">“'+INF.quote+'”</div>';
  el.innerHTML=h;
+ // reflect current pause state on the control button
+ var pb=document.getElementById('infpausebtn');
+ if(pb){ if(L.paused_manual){ pb.textContent='▶ Resume new orders'; pb.className='infbtn resume'; }
+         else { pb.textContent='⏸ Pause new orders'; pb.className='infbtn pause'; } }
  // update the floor sprite's hover tip
  var sp=document.getElementById('spr-infinity'); if(sp){ var tip=sp.querySelector('.tip'); if(tip){ tip.innerHTML='<b>DM Infinity</b> · '+money(bal)+' ('+signed(pnl)+')'+(wr!=null?' · '+wr+'% W':''); } }
 }
