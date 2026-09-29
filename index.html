@@ -771,7 +771,21 @@ function buildInfinity(){
    '.infgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:14px}'+
    '.inftile{background:var(--card,#fff);border:1px solid var(--paperline,#dcd);border-radius:8px;padding:14px 16px}'+
    '.inftile .k{font-size:11.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--faint,#889)}'+
+   '.inftile .ktag{text-transform:none;letter-spacing:0;font-size:10px;color:var(--faint,#99a);opacity:.75;font-weight:600}'+
    '.inftile .v{font-size:26px;font-weight:800;margin-top:4px;font-family:var(--disp,inherit)}'+
+   '.inftbl-wrap{margin-top:16px}'+
+   '.inftbl-wrap.scroll{max-height:360px;overflow:auto;border:1px solid var(--paperline,#dcd);border-radius:8px}'+
+   '.inftbl-h{font-size:11.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--faint,#889);font-weight:700;margin-bottom:7px}'+
+   '.inftbl-wrap.scroll .inftbl-h{padding:10px 10px 6px}'+
+   '.inftbl{width:100%;border-collapse:collapse;font-size:13px;background:var(--card,#fff)}'+
+   '.inftbl-wrap:not(.scroll) .inftbl{border:1px solid var(--paperline,#dcd);border-radius:8px;overflow:hidden}'+
+   '.inftbl th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.4px;color:var(--faint,#889);padding:8px 10px;border-bottom:1px solid var(--paperline,#dcd);position:sticky;top:0;background:var(--card,#fff)}'+
+   '.inftbl td{padding:7px 10px;border-bottom:1px solid var(--paperline,#eee);font-family:var(--mono,monospace);font-size:12.5px;color:#c8d4e0}'+
+   '.inftbl tr:last-child td{border-bottom:0}'+
+   '.inftbl .gain{color:var(--gain,#1a9d5a);font-weight:700}'+
+   '.inftbl .loss{color:var(--loss,#c0392b);font-weight:700}'+
+   '.inftbl .win{color:var(--gain,#1a9d5a);font-weight:800}'+
+   '.inftbl .lose{color:var(--loss,#c0392b);font-weight:800}'+
    '.infnote{font-size:13px;color:#aebccb;background:var(--card,#fff);border:1px dashed var(--paperline,#dcd);border-radius:8px;padding:12px 14px}'+
    '.infvs{margin-top:12px;font-size:13.5px;color:#c8d4e0}'+
    '.infpaused{background:#3a1e12;border:1px solid #c0392b;color:#ffcf5c;border-radius:8px;padding:11px 14px;margin-bottom:12px;font-weight:700;font-size:14px;text-align:center;letter-spacing:.3px}'+
@@ -796,11 +810,16 @@ function renderInfinity(L,Rmain){
  var fresh; if(!L.updated){ fresh='standing by — no report yet'; }
  else { var m=Math.round((Date.now()-new Date(L.updated).getTime())/60000); fresh=(m<1?'updated just now':'updated '+m+'m ago'); }
  var pnlc=pnl>=0?'var(--gain,#1a9d5a)':'var(--loss,#c0392b)';
+ var realized=(L.realized_pnl!=null?L.realized_pnl:null);
+ var rlc=(realized!=null&&realized>=0)?'var(--gain,#1a9d5a)':'var(--loss,#c0392b)';
  var paused=L.paused_manual||L.paused;
  var banner=paused?('<div class="infpaused">⏸ PAUSED'+(L.paused_manual?' — manually stopped':'')+' · not placing new trades</div>'):'';
+ function _esc(x){return String(x==null?'':x).replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];});}
+ function _tf(s){try{return new Date(s).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});}catch(e){return s||'';}}
  var h=banner+'<div class="infgrid">'+
   '<div class="inftile"><div class="k">Balance</div><div class="v">'+money(bal)+'</div></div>'+
-  '<div class="inftile"><div class="k">Net P&amp;L</div><div class="v" style="color:'+pnlc+'">'+signed(pnl)+'</div></div>'+
+  '<div class="inftile"><div class="k">Net P&amp;L <span class="ktag">incl. open</span></div><div class="v" style="color:'+pnlc+'">'+signed(pnl)+'</div></div>'+
+  '<div class="inftile"><div class="k">Realized <span class="ktag">settled only</span></div><div class="v" style="color:'+rlc+'">'+(realized!=null?signed(realized):'—')+'</div></div>'+
   '<div class="inftile"><div class="k">Win rate</div><div class="v">'+(wr!=null?wr+'%':'—')+'</div></div>'+
   '<div class="inftile"><div class="k">Bets settled</div><div class="v">'+settled+'</div></div>'+
   '<div class="inftile"><div class="k">Open now</div><div class="v">'+openN+'</div></div>'+
@@ -819,6 +838,26 @@ function renderInfinity(L,Rmain){
   var better=Rmain.filter(function(t){return (t.pnl/1000)>infPct;}).length;
   var rank=better+1;
   h+='<div class="infvs">If Infinity were on the paper board, its <b>'+(infPct>=0?'+':'')+(infPct*100).toFixed(1)+'%</b> return would rank <b>#'+rank+'</b> against the '+Rmain.length+' staff.</div>';
+ }
+ // per-category win/loss record
+ if(L.by_cat&&L.by_cat.length){
+  h+='<div class="inftbl-wrap"><div class="inftbl-h">By category · '+L.by_cat.length+' markets</div>'+
+     '<table class="inftbl"><thead><tr><th>Category</th><th>W–L</th><th>Win%</th><th>P&amp;L</th></tr></thead><tbody>';
+  L.by_cat.forEach(function(c){
+   var pc=((c.pnl||0)>=0?'gain':'loss');
+   h+='<tr><td>'+_esc(c.cat)+'</td><td>'+c.w+'–'+c.l+'</td><td>'+(c.winrate!=null?c.winrate+'%':'—')+'</td><td class="'+pc+'">'+signed(c.pnl||0)+'</td></tr>';
+  });
+  h+='</tbody></table></div>';
+ }
+ // rolling trade log
+ if(L.history&&L.history.length){
+  h+='<div class="inftbl-wrap scroll"><div class="inftbl-h">Last '+L.history.length+' settled trades</div>'+
+     '<table class="inftbl"><thead><tr><th>Time</th><th>Category</th><th>Side</th><th>Entry</th><th>Result</th><th>P&amp;L</th></tr></thead><tbody>';
+  L.history.forEach(function(t){
+   var rc=(t.result==='W'?'win':'lose'); var pc=((t.pnl||0)>=0?'gain':'loss');
+   h+='<tr><td>'+_tf(t.t)+'</td><td>'+_esc(t.cat)+'</td><td>'+_esc(t.side)+'</td><td>'+(t.price!=null?(+t.price).toFixed(2):'—')+'</td><td class="'+rc+'">'+(t.result||'')+'</td><td class="'+pc+'">'+signed(t.pnl||0)+'</td></tr>';
+  });
+  h+='</tbody></table></div>';
  }
  h+='<div class="infquote">“'+INF.quote+'”</div>';
  el.innerHTML=h;
