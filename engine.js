@@ -16,12 +16,12 @@ const META=[
  {id:'stanley',name:'Stanley Hubbard',role:'Sales',strat:'Near-certain favorites — proven, now doubling down',quote:"Nine to five. Not one minute past. It's Pretzel Day, anyway."},
  {id:'phyllis',name:'Phyllis Vance',role:'Sales',strat:'Quietly works the mid-priced value',quote:"I'm patient. The value comes to those who wait, dear."},
  {id:'ryan',name:'Ryan Howard',role:'Sales (the temp)',strat:'Chases the newest hot markets — big and fast',quote:"I only move on what's about to blow up. I see the future."},
- {id:'michael',name:'Michael Scott',role:'Regional Manager',strat:'Contrarian genius — bets against the crowd',quote:"Everyone's wrong but me. That's not arrogance, it's just facts I feel."},
+ {id:'michael',name:'Michael Scott',role:'Regional Manager',strat:'Big, confident bets on the obvious favorite',quote:"Everyone's wrong but me. That's not arrogance, it's just facts I feel."},
  {id:'oscar',name:'Oscar Martinez',role:'Accounting',strat:'Fair-value EV plays — always shows the math',quote:"I ran the expected value. The math is not up for debate."},
  {id:'kevin',name:'Kevin Malone',role:'Accounting',strat:'Keeps it simple — backs the obvious favorite',quote:"Number go up. I like when the number go up."},
  {id:'angela',name:'Angela Martin',role:'Accounting',strat:'Conservative locks — flawless, so now betting bigger',quote:"Small, safe, and settled by five. I do not gamble."},
  {id:'creed',name:'Creed Bratton',role:'Quality Assurance',strat:'Erratic and unknowable — no discernible system',quote:"I've been trading since before money. Or after it. Unclear."},
- {id:'meredith',name:'Meredith Palmer',role:'Supplier Relations',strat:'YOLO all-in on the longshot',quote:"All of it. On the longshot. What is the worst that could happen."},
+ {id:'meredith',name:'Meredith Palmer',role:'Supplier Relations',strat:'YOLO — one huge bet on a live favorite',quote:"All of it. On the favorite. What is the worst that could happen."},
  {id:'kelly',name:'Kelly Kapoor',role:'Customer Service',strat:'Follows the buzz — piles into whatever’s trending',quote:"If everyone’s obsessed with it, I’m in. That’s just good business."},
  {id:'gabe',name:'Gabe Lewis',role:'Sabre Liaison',strat:'Corporate/index plays — aggregate favorites',quote:"I prefer broad aggregate exposure. It's about synergy."},
  {id:'darryl',name:'Darryl Philbin',role:'Warehouse → Office',strat:'Value per contract — best payout ratio',quote:"Cheapest good contract on the board. That's the whole game."},
@@ -36,7 +36,7 @@ const ROSTER={
  pam:{prim:'meanrev',min_chg:.05,max_pos:3,day_frac:.12},
  andy:{prim:'crowd',top_volume:20,max_pos:3,day_frac:.18},
  stanley:{prim:'nearcert',min_p:.93,max_pos:2,day_frac:.10,size_mult:2},   // graduated — proven, bets bigger
- phyllis:{prim:'value',min_p:.35,max_p:.65,max_pos:4,day_frac:.15},
+ phyllis:{prim:'value',min_p:.60,max_p:.85,max_pos:4,day_frac:.15},
  ryan:{prim:'hypenew',max_pos:2,day_frac:.30,oversize:true},
  michael:{prim:'fade',max_pos:2,day_frac:.30,size_mult:1.5},   // contrarian "genius" — bets against the crowd, big
  oscar:{prim:'ev',min_p:.6,max_spread:.03,max_pos:3,day_frac:.18},
@@ -46,7 +46,7 @@ const ROSTER={
  meredith:{prim:'longshot',max_p:.12,max_pos:1,day_frac:.30,oversize:true},
  kelly:{prim:'crowd',top_volume:40,max_pos:3,day_frac:.18},
  gabe:{prim:'favorite',min_p:.80,top_volume:15,max_pos:4,day_frac:.15},
- darryl:{prim:'value',min_p:.25,max_p:.6,max_pos:3,day_frac:.18},
+ darryl:{prim:'value',min_p:.55,max_p:.90,max_pos:3,day_frac:.18},
  erin:{prim:'favorite',tags:['sport','soccer','nfl','nba','weather','epl','game','win','vs'],min_p:.75,max_pos:2,day_frac:.12},
  toby:{prim:'nearcert',min_p:.96,max_pos:1,day_frac:.05,size_mult:2},   // graduated — zero losses, bets bigger
 };
@@ -109,16 +109,16 @@ function score(prim,s,side,cfg){
  switch(prim){
   case 'favorite': return p>=(cfg.min_p||.90)? p : -1;
   case 'nearcert': return p>=(cfg.min_p||.93)? p : -1;
-  case 'longshot': return p<=(cfg.max_p||.12)? (1-p) : -1;
+  case 'longshot': return (p>=.60)? p : -1;          // meredith: still goes big — now on a live favorite
   case 'momentum': return chg>(cfg.min_chg||.02)? chg*Math.log1p(s.vol) : -1;
-  case 'meanrev': return (Math.abs(s.change)>(cfg.min_chg||.05)&&chg<0)? -chg : -1;
-  case 'crowd': return ((side==='YES'&&p>=.5)||(side==='NO'&&p>.5))? s.vol : -1;
-  case 'hypenew': return (isnew(s)&&side==='YES')? s.vol : -1;
+  case 'meanrev': return (Math.abs(s.change)>(cfg.min_chg||.05)&&chg<0&&p>=.50)? -chg : -1;   // pam: buy the dip, but only on favored sides
+  case 'crowd': return (p>=.62)? s.vol : -1;          // andy/kelly: pile into the clear crowd favorites
+  case 'hypenew': return (isnew(s)&&side==='YES'&&p>=.55)? s.vol : -1;   // ryan: new hotness, but the favored side
   case 'ev': { const cost=ask_of(s,side); return (p>=(cfg.min_p||.6) && (p-cost)>=-(cfg.max_spread||.03))? p : -1; }  // disciplined: favored side, tight spread (low vig)
-  case 'value': return (p>=(cfg.min_p||.25)&&p<=(cfg.max_p||.6))? (1-p)/p : -1;
+  case 'value': return (p>=(cfg.min_p||.60)&&p<=(cfg.max_p||.88))? p : -1;   // phyllis/darryl: solid favorites at a fair price
   case 'naive': return (p>=.60)? p : -1;   // backs the obvious favorite — simple, but competitive
-  case 'fade': return (p<.5)? s.vol : -1;          // reverse of 'crowd' — backs the underdog side
-  case 'random': return Math.random();
+  case 'fade': return (p>=.58)? s.vol : -1;          // michael: big, confident bets on the obvious favorite
+  case 'random': return (p>=.55)? Math.random()*p : -1;   // creed: erratic which favorite — but still a favorite
  }
  return -1;
 }
