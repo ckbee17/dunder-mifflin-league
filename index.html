@@ -314,7 +314,7 @@ const META=[
  {id:'ryan',name:'Ryan Howard',role:'Sales (the temp)',strat:'Chases the newest hot markets — big and fast',quote:"I only move on what's about to blow up. I see the future."},
  {id:'michael',name:'Michael Scott',role:'Regional Manager',strat:'Contrarian genius — bets against the crowd',quote:"Everyone's wrong but me. That's not arrogance, it's just facts I feel."},
  {id:'oscar',name:'Oscar Martinez',role:'Accounting',strat:'Fair-value EV plays — always shows the math',quote:"I ran the expected value. The math is not up for debate."},
- {id:'kevin',name:'Kevin Malone',role:'Accounting',strat:'Bets the obvious markets — does the math wrong',quote:"Number go up. I like when the number go up."},
+ {id:'kevin',name:'Kevin Malone',role:'Accounting',strat:'Keeps it simple — backs the obvious favorite',quote:"Number go up. I like when the number go up."},
  {id:'angela',name:'Angela Martin',role:'Accounting',strat:'Conservative locks — flawless, so now betting bigger',quote:"Small, safe, and settled by five. I do not gamble."},
  {id:'creed',name:'Creed Bratton',role:'Quality Assurance',strat:'Erratic and unknowable — no discernible system',quote:"I've been trading since before money. Or after it. Unclear."},
  {id:'meredith',name:'Meredith Palmer',role:'Supplier Relations',strat:'YOLO all-in on the longshot',quote:"All of it. On the longshot. What is the worst that could happen."},
@@ -412,7 +412,7 @@ function score(prim,s,side,cfg){
   case 'hypenew': return (isnew(s)&&side==='YES')? s.vol : -1;
   case 'ev': { const cost=ask_of(s,side); return (p>=(cfg.min_p||.6) && (p-cost)>=-(cfg.max_spread||.03))? p : -1; }  // disciplined: favored side, tight spread (low vig)
   case 'value': return (p>=(cfg.min_p||.25)&&p<=(cfg.max_p||.6))? (1-p)/p : -1;
-  case 'naive': return (side==='YES'&&p<=.5)? (1-p) : -1;
+  case 'naive': return (p>=.60)? p : -1;   // backs the obvious favorite — simple, but competitive
   case 'fade': return (p<.5)? s.vol : -1;          // reverse of 'crowd' — backs the underdog side
   case 'random': return Math.random();
  }
