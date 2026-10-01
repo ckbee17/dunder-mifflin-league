@@ -5,7 +5,7 @@
    ========================================================================== */
 (function(){
 "use strict";
-const START=1000, BET_SIZE=50, MIN_BET=10, MAX_OPEN=10, CONTEST_DAYS=30, KEY="dmpl_v1";
+const START=10000, BET_SIZE=50, MIN_BET=10, MAX_OPEN=10, CONTEST_DAYS=30, KEY="dmpl_v1";
 const GAMMA="https://gamma-api.polymarket.com/markets";
 
 const META=[
@@ -76,7 +76,7 @@ async function fetchJSON(url){ const r=await fetch(url,{headers:{Accept:'applica
 /* ---------- state ---------- */
 function freshState(){
  const agents={}, records={};
- IDS.forEach(k=>{ agents[k]={cash:START,positions:{},realized:0,fees:0,trades:0,wins:0,losses:0,equity:[START],today_trades:0,log:[],day_spent:0,tier:'main',flip:false,size_mult:(ROSTER[k]&&ROSTER[k].size_mult)||1,win_tier:0};
+ IDS.forEach(k=>{ agents[k]={cash:START,positions:{},realized:0,fees:0,trades:0,wins:0,losses:0,equity:[START],today_trades:0,log:[],day_spent:0,tier:'main',flip:false,size_mult:1,win_tier:0};
    records[k]={daily:[],days_led:0,best_day:0,worst_day:0,brier_sum:0,brier_n:0,streak:0,peak:START}; });
  return {agents,records,seen:{},runs:0,last_run:null,start_date:etToday(),day:null,day_start:{},last_equity:{}};
 }
@@ -223,7 +223,7 @@ async function runRound(){
   const settled=a.wins+a.losses, wr=settled? a.wins/settled : 1, cur=Math.floor((a.wins||0)/500);
   if(a.win_tier==null) a.win_tier=cur;                       // baseline; no retroactive reward
   if(cur>a.win_tier && wr>=0.95){                            // reached a new milestone AND holding 95%+
-   while(a.win_tier<cur){ a.size_mult=(a.size_mult||1)*2; a.win_tier++; }   // double per milestone (earned ones are kept forever)
+   a.win_tier=cur;   // milestone reached — bets stay uniform across the board (no doubling)
    st.events.unshift({t:Date.now(),k:'promo',id:id,run:st.runs,mult:a.size_mult,wins:a.wins});
   } });
  // ---- The Warehouse: relegate the bankrupt, promote the redeemed ----
