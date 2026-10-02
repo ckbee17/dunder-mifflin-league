@@ -136,7 +136,7 @@
     <div class="subline">The Paper Company that trades on paper — real live Polymarket markets. Winner graduates to a live account.</div>
     <div class="hud">
       <span class="pill">DAY <b id="day">12</b> / 30</span>
-      <span class="pill">STAKE <b>$1,000</b> each</span>
+      <span class="pill">STAKE <b>$10,000</b> each</span>
       <span class="pill">MARKETS <b>same-day close</b></span>
       <span class="pill" id="clock">--:--:-- ET</span>
       <span class="pill demo">● DEMO DATA — NOT LIVE</span>
@@ -181,13 +181,13 @@
     font-size:20px;color:#555;transform:rotate(-4deg);max-width:210px;text-align:center;z-index:1}
 </style>
 <div class="tabs">
-  <button class="tab active" data-tab="bullpen">The Bullpen</button>
+  <button class="tab active" data-tab="bullpen">The Sales Floor</button>
   <button class="tab" data-tab="conf">Conference Room</button>
 </div>
 <div id="bullpen">
   <div class="spot" id="spot"></div>
 
-  <div class="h2">THE BULLPEN STANDINGS <span class="note">click anyone to spotlight · ranked by net P&amp;L</span></div>
+  <div class="h2">THE SALES FLOOR STANDINGS <span class="note">click anyone to spotlight · ranked by net P&amp;L</span></div>
 
   <div class="cols">
     <div class="grid" id="grid"></div>
@@ -202,7 +202,7 @@
       </section>
       <section class="panel">
         <div class="ph">How This Runs</div>
-        <div class="note">This page trades on its own while it's open. Each cycle it pulls live same-day Polymarket markets, places every bot's bets ($25 each, max 10 open at a time), settles anything that resolved, and saves to this browser. Leave the tab open and it runs the whole month — use the bar up top to set the pace, run a round now, or pause.</div>
+        <div class="note">This page trades on its own while it's open. Each cycle it pulls live same-day Polymarket markets, places every bot's bets ($50 each, max 10 open at a time), settles anything that resolved, and saves to this browser. Leave the tab open and it runs the whole month — use the bar up top to set the pace, run a round now, or pause.</div>
       </section>
     </aside>
   </div>
@@ -576,7 +576,7 @@ function renderGrid(R){
   return '<div class="card '+cl+(t.id===selected?' sel':'')+'" data-id="'+t.id+'">'+
    '<div class="rk '+cl+'">'+(i+1)+'</div>'+
    '<div class="pf"><img src="'+img(t.id)+'" alt=""></div>'+
-   '<div class="meta"><div class="nm">'+t.name+'</div><div class="role">'+t.role+'</div><div class="strat">'+t.strat+'</div></div>'+
+   '<div class="meta"><div class="nm">'+t.name+'</div><div class="role">'+t.role+'</div><div class="strat">'+t.strat+'</div>'+medalPips(MED.byId&&MED.byId[t.id])+'</div>'+
    '<div>'+spark(t.equity,150,44)+'</div>'+
    '<div class="figs"><div class="bal">'+money(t.balance)+'</div>'+
      '<span class="pnl '+(t.pnl>=0?'g':'l')+'">'+signed(t.pnl)+'</span>'+
@@ -624,10 +624,14 @@ function renderConf(R){
   return '<li class="'+cls+'"><span><span class="r">'+(i+1)+'.</span>'+t.name+'</span><b>'+money(t.balance)+'</b></li>'; }).join('');
  const dEl=document.getElementById('day');
  document.getElementById('confDate').textContent='Day '+(dEl?dEl.textContent:'1')+' · winner goes live';
+ var fn=function(id){return METABY[id]?METABY[id].name:id;};
+ var extra='';
+ if(MED.hall&&MED.hall.topMonth) extra+='<div class="award" style="border-color:#237a4a;transform:rotate(-1deg)"><h4 style="color:#237a4a">Top Earnings Month</h4><div class="big" style="color:#237a4a">'+fn(MED.hall.topMonth.id)+'</div></div>';
+ if(MED.hall&&MED.hall.mostMedals) extra+='<div class="award" style="transform:rotate(1deg)"><h4>Most Medals</h4><div class="big">'+fn(MED.hall.mostMedals.id)+' · '+MED.hall.mostMedals.n+'</div></div>';
  document.getElementById('confAwards').innerHTML=
   '<div class="award"><h4>Top Dog</h4><div class="big">'+R[0].name+'</div></div>'+
   '<div class="award" style="border-color:#1553a6;transform:rotate(-1.5deg)"><h4>Leading Today</h4><div class="big" style="color:#1553a6">'+byToday[0].name+'</div></div>'+
-  '<div class="award" style="border-color:#c1442e;transform:rotate(2deg)"><h4 style="color:#c1442e">In the Cellar</h4><div class="big" style="color:#c1442e">'+last.name+'</div></div>';
+  '<div class="award" style="border-color:#c1442e;transform:rotate(2deg)"><h4 style="color:#c1442e">In the Cellar</h4><div class="big" style="color:#c1442e">'+last.name+'</div></div>'+extra;
  document.getElementById('confNote').textContent='Whoever wins becomes our real bot. No pressure. — Management';
 }
 function renderFeed(R){
@@ -638,7 +642,33 @@ function renderFeed(R){
  by.slice(-2).reverse().forEach(r=>{ if(r.today_pnl<0) h+='<div class="fi"><b>'+r.name.split(' ')[0]+'</b> down <span style="color:var(--loss)">−$'+Math.abs(Math.round(r.today_pnl))+'</span> · $'+Math.round(r.fees)+' fees</div>'; });
  f.innerHTML=h;
 }
+/* ---------- monthly yogurt medals, derived from the daily history ---------- */
+let MED={byId:{},hall:{},curLeader:null};
+function monthlyMedals(st){
+ const cur=etToday().slice(0,7); const byMonth={}, curMonth={}; let biggestDay=null;
+ IDS.forEach(id=>{ const daily=(st.records&&st.records[id]&&st.records[id].daily)||[];
+  daily.forEach(d=>{ const mo=(d.date||'').slice(0,7), pnl=+d.pnl||0; if(!mo) return;
+   if(d.pnl!=null && (!biggestDay||pnl>biggestDay.pnl)) biggestDay={id,pnl};
+   if(mo===cur) curMonth[id]=(curMonth[id]||0)+pnl;
+   else { (byMonth[mo]=byMonth[mo]||{}); byMonth[mo][id]=(byMonth[mo][id]||0)+pnl; } }); });
+ const byId={}; IDS.forEach(id=>byId[id]=[]); let topMonth=null;
+ Object.keys(byMonth).sort().forEach(mo=>{ const e=Object.keys(byMonth[mo]).sort((a,b)=>byMonth[mo][b]-byMonth[mo][a]);
+  ['gold','silver','bronze'].forEach((k,i)=>{ const id=e[i]; if(id) byId[id].push({kind:k,month:mo,pnl:byMonth[mo][id]}); });
+  const t=e[0]; if(t){ const v=byMonth[mo][t]; if(!topMonth||v>topMonth.pnl) topMonth={id:t,month:mo,pnl:v}; } });
+ let mostMedals=null; IDS.forEach(id=>{ const n=byId[id].length; if(n>0&&(!mostMedals||n>mostMedals.n)) mostMedals={id,n}; });
+ let curLeader=null; Object.keys(curMonth).forEach(id=>{ if(!curLeader||curMonth[id]>curLeader.pnl) curLeader={id,pnl:curMonth[id]}; });
+ return {byId, hall:{topMonth,mostMedals,biggestDay}, curLeader};
+}
+function medalPips(list){
+ if(!list||!list.length) return '';
+ const c={gold:0,silver:0,bronze:0}; list.forEach(m=>c[m.kind]++);
+ const pip=(col,n,ti)=>'<span title="'+ti+'" style="display:inline-grid;place-items:center;width:17px;height:17px;border-radius:50%;background:'+col+';color:#fff;font:700 9px/1 system-ui;box-shadow:inset 0 -2px 2px rgba(0,0,0,.28),0 1px 1px rgba(0,0,0,.25)">'+n+'</span>';
+ let h='<div class="plate-medals" style="display:flex;gap:3px;margin-top:5px">';
+ if(c.gold) h+=pip('#cf9c1f',c.gold,'gold'); if(c.silver) h+=pip('#9aa3ad',c.silver,'silver'); if(c.bronze) h+=pip('#2f5fd0',c.bronze,'bronze (royal blue)');
+ return h+'</div>';
+}
 function render(st,priceByMid,snaps){
+ try{ MED=monthlyMedals(st); }catch(e){ MED={byId:{},hall:{},curLeader:null}; }
  const R=rows(st).sort((a,b)=>b.balance-a.balance);
  const Rmain=R.filter(t=>t.tier!=='warehouse'), Rwh=R.filter(t=>t.tier==='warehouse');
  const dEl=document.getElementById('day'); if(dEl){ const dn=Math.round((new Date(etToday())-new Date(st.start_date))/864e5)+1; dEl.textContent=dn>0?dn:1; }
@@ -874,7 +904,7 @@ function buildWarehouse(){
  var tabs=document.querySelector('.tabs');
  if(tabs){ var b=document.createElement('button'); b.className='tab'; b.setAttribute('data-tab','warehouse'); b.textContent='The Warehouse'; tabs.appendChild(b); }
  var sec=document.createElement('section'); sec.id='warehouse'; sec.hidden=true;
- sec.innerHTML='<div class="whhead"><h3>THE WAREHOUSE</h3><p>Wash out of the main league and you land here: a fresh $1,000, your strategy flipped upside-down. Win back $500 (reach $1,500) and you’re reinstated upstairs — flipped strategy and all.</p></div><div id="whgrid" class="grid"></div>';
+ sec.innerHTML='<div class="whhead"><h3>THE WAREHOUSE</h3><p>Wash out of the main league and you land here: a fresh $10,000, your strategy flipped upside-down. Win back $500 (reach $10,500) and you’re reinstated upstairs — flipped strategy and all.</p></div><div id="whgrid" class="grid"></div>';
  var anchor=document.getElementById('office')||document.getElementById('conf');
  anchor.parentNode.insertBefore(sec, anchor.nextSibling);
  if(!document.getElementById('whcss')){ var st=document.createElement('style'); st.id='whcss';
