@@ -217,6 +217,18 @@ async function runRound(){
   a.equity.push(eq); if(a.equity.length>90) a.equity=a.equity.slice(-90);
   st.last_equity[id]=eq; st.records[id].peak=Math.max(st.records[id].peak,eq);
   if(st.day_start[id]==null) st.day_start[id]=eq; });
+ // ---- Benchmark: snapshot the DM Infinity bot ("The Computer") so the league can race the machine ----
+ try{ const cj=await fetchJSON('https://dunder-mifflin-league-production.up.railway.app/live.json');
+  st.computer=st.computer||{daily:[]};
+  if(cj && cj.deposited!=null) st.computer.deposited=+cj.deposited;
+  if(cj && cj.balance!=null)   st.computer.balance=+cj.balance;
+  const _ct=etToday(), _cd=st.computer.daily=st.computer.daily||[];
+  if(st.computer.balance!=null){
+   if(!_cd.length||_cd[_cd.length-1].date!==_ct) _cd.push({date:_ct,bal:st.computer.balance});
+   else _cd[_cd.length-1].bal=st.computer.balance;        // last run of the day = day's closing balance
+   if(_cd.length>400) st.computer.daily=_cd.slice(-400);
+  }
+ }catch(e){ /* benchmark is best-effort; never block a round on it */ }
  // ---- Win-milestone promotions: cross a new 500-win mark at ≥95% win rate → bet size doubles ----
  st.events=st.events||[];
  IDS.forEach(id=>{ const a=st.agents[id];

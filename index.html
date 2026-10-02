@@ -177,8 +177,8 @@
   .wb .award .big{font-size:25px;font-weight:700;color:#237a4a}
   .wb .doodle{position:absolute;right:24px;top:14px;font-family:'Permanent Marker',cursive;
     color:#c1442e;font-size:17px;transform:rotate(8deg);border:3px solid #c1442e;padding:4px 8px;border-radius:6px;z-index:2}
-  .wb .mgmt{position:absolute;right:30px;bottom:44px;font-family:'Caveat',cursive;font-weight:700;
-    font-size:20px;color:#555;transform:rotate(-4deg);max-width:210px;text-align:center;z-index:1}
+  .wb .mgmt{margin:12px 30px 10px auto;font-family:'Caveat',cursive;font-weight:700;
+    font-size:20px;color:#555;transform:rotate(-4deg);max-width:230px;text-align:center;position:relative;z-index:1}
 </style>
 <div class="tabs">
   <button class="tab active" data-tab="bullpen">The Sales Floor</button>
@@ -513,6 +513,18 @@ async function runRound(){
   a.equity.push(eq); if(a.equity.length>90) a.equity=a.equity.slice(-90);
   st.last_equity[id]=eq; st.records[id].peak=Math.max(st.records[id].peak,eq);
   if(st.day_start[id]==null) st.day_start[id]=eq; });
+ // ---- Benchmark: snapshot the DM Infinity bot ("The Computer") so the league can race the machine ----
+ try{ const cj=await fetchJSON('https://dunder-mifflin-league-production.up.railway.app/live.json');
+  st.computer=st.computer||{daily:[]};
+  if(cj && cj.deposited!=null) st.computer.deposited=+cj.deposited;
+  if(cj && cj.balance!=null)   st.computer.balance=+cj.balance;
+  const _ct=etToday(), _cd=st.computer.daily=st.computer.daily||[];
+  if(st.computer.balance!=null){
+   if(!_cd.length||_cd[_cd.length-1].date!==_ct) _cd.push({date:_ct,bal:st.computer.balance});
+   else _cd[_cd.length-1].bal=st.computer.balance;        // last run of the day = day's closing balance
+   if(_cd.length>400) st.computer.daily=_cd.slice(-400);
+  }
+ }catch(e){ /* benchmark is best-effort; never block a round on it */ }
  // ---- Win-milestone promotions: cross a new 500-win mark at ≥95% win rate → bet size doubles ----
  st.events=st.events||[];
  IDS.forEach(id=>{ const a=st.agents[id];
@@ -619,8 +631,14 @@ function renderMarkets(snaps){
 function renderConf(R){
  if(!document.getElementById('confList')) return;
  const last=R[R.length-1]; const byToday=R.slice().sort((a,b)=>b.today_pnl-a.today_pnl);
- document.getElementById('confList').innerHTML=R.slice(0,10).map((t,i)=>{
-  const cls=i===0?'lead':(t.id===last.id?'last':'');
+ const CP=MED.computer;
+ const board=R.map(t=>({name:t.name,balance:t.balance,comp:false,id:t.id}));
+ if(CP) board.push({name:'The Computer',balance:CP.normBal,comp:true,ram:CP.ram});
+ board.sort((a,b)=>b.balance-a.balance);
+ document.getElementById('confList').innerHTML=board.slice(0,10).map((t,i)=>{
+  if(t.comp) return '<li style="background:linear-gradient(90deg,rgba(21,83,166,.10),transparent);border-left:3px solid #2f5fd0">'+
+    '<span><span class="r">'+(i+1)+'.</span>💻 '+t.name+' <span style="font:600 9px/1 system-ui;color:#1553a6;border:1px solid #9bc0ef;border-radius:3px;padding:2px 4px;vertical-align:middle;margin-left:3px">BENCHMARK · norm. to $10k</span>'+ramPips(t.ram)+'</span><b>'+money(t.balance)+'</b></li>';
+  const cls=i===0?'lead':(t.id===(last&&last.id)?'last':'');
   return '<li class="'+cls+'"><span><span class="r">'+(i+1)+'.</span>'+t.name+'</span><b>'+money(t.balance)+'</b></li>'; }).join('');
  const dEl=document.getElementById('day');
  document.getElementById('confDate').textContent='Day '+(dEl?dEl.textContent:'1')+' · winner goes live';
@@ -628,6 +646,9 @@ function renderConf(R){
  var extra='';
  if(MED.hall&&MED.hall.topMonth) extra+='<div class="award" style="border-color:#237a4a;transform:rotate(-1deg)"><h4 style="color:#237a4a">Top Earnings Month</h4><div class="big" style="color:#237a4a">'+fn(MED.hall.topMonth.id)+'</div></div>';
  if(MED.hall&&MED.hall.mostMedals) extra+='<div class="award" style="transform:rotate(1deg)"><h4>Most Medals</h4><div class="big">'+fn(MED.hall.mostMedals.id)+' · '+MED.hall.mostMedals.n+'</div></div>';
+ if(MED.computer){ const r=MED.computer.ram, tot=r.gold+r.silver+r.bronze;
+  extra+='<div class="award" style="border-color:#2f5fd0;transform:rotate(-1deg)"><h4 style="color:#1553a6">The Machine’s Memory</h4>'+
+    (tot? '<div style="display:flex;justify-content:center">'+ramPips(r)+'</div>' : '<div class="big" style="color:#1553a6;font-size:13px">no sticks yet</div>')+'</div>'; }
  document.getElementById('confAwards').innerHTML=
   '<div class="award"><h4>Top Dog</h4><div class="big">'+R[0].name+'</div></div>'+
   '<div class="award" style="border-color:#1553a6;transform:rotate(-1.5deg)"><h4>Leading Today</h4><div class="big" style="color:#1553a6">'+byToday[0].name+'</div></div>'+
@@ -643,7 +664,7 @@ function renderFeed(R){
  f.innerHTML=h;
 }
 /* ---------- monthly yogurt medals, derived from the daily history ---------- */
-let MED={byId:{},hall:{},curLeader:null};
+let MED={byId:{},hall:{},curLeader:null,computer:null};
 function monthlyMedals(st){
  const cur=etToday().slice(0,7); const byMonth={}, curMonth={}; let biggestDay=null;
  IDS.forEach(id=>{ const daily=(st.records&&st.records[id]&&st.records[id].daily)||[];
@@ -657,18 +678,56 @@ function monthlyMedals(st){
   const t=e[0]; if(t){ const v=byMonth[mo][t]; if(!topMonth||v>topMonth.pnl) topMonth={id:t,month:mo,pnl:v}; } });
  let mostMedals=null; IDS.forEach(id=>{ const n=byId[id].length; if(n>0&&(!mostMedals||n>mostMedals.n)) mostMedals={id,n}; });
  let curLeader=null; Object.keys(curMonth).forEach(id=>{ if(!curLeader||curMonth[id]>curLeader.pnl) curLeader={id,pnl:curMonth[id]}; });
- return {byId, hall:{topMonth,mostMedals,biggestDay}, curLeader};
+ // ---- The Computer (DM Infinity bot): normalized to the $10k scale, earns RAM sticks (not yogurt) ----
+ const comp=st.computer||{}; const cDaily=comp.daily||[];
+ const cDep=(comp.deposited!=null?+comp.deposited: (cDaily.length?cDaily[0].bal:0))||0;
+ let computer=null;
+ if(cDep>0){
+  const cBal=(comp.balance!=null?+comp.balance:(cDaily.length?cDaily[cDaily.length-1].bal:cDep));
+  const normBal=START*(cBal/cDep);                                   // today's standing, normalized to $10k
+  const cEnd={}; cDaily.forEach(d=>{ const mo=(d.date||'').slice(0,7); if(mo&&mo!==cur) cEnd[mo]=d.bal; });
+  const cMonths=Object.keys(cEnd).sort();
+  const ram={gold:0,silver:0,bronze:0}, ramList=[];
+  cMonths.forEach((mo,i)=>{
+   const base=(i>0? cEnd[cMonths[i-1]] : cDep); if(!base) return;
+   const normGain=START*((cEnd[mo]/base)-1);                         // the machine's monthly gain on a $10k base
+   const staff=byMonth[mo]||{}; const beat=Object.keys(staff).filter(id=>staff[id]>normGain).length;
+   const rank=beat+1; const k=rank===1?'gold':rank===2?'silver':rank===3?'bronze':null;
+   if(k){ ram[k]++; ramList.push({kind:k,month:mo,gain:normGain,rank}); }
+  });
+  computer={normBal, deposited:cDep, balance:cBal, ram, ramList};
+ }
+ return {byId, hall:{topMonth,mostMedals,biggestDay}, curLeader, computer};
 }
 function medalPips(list){
- if(!list||!list.length) return '';
- const c={gold:0,silver:0,bronze:0}; list.forEach(m=>c[m.kind]++);
- const pip=(col,n,ti)=>'<span title="'+ti+'" style="display:inline-grid;place-items:center;width:17px;height:17px;border-radius:50%;background:'+col+';color:#fff;font:700 9px/1 system-ui;box-shadow:inset 0 -2px 2px rgba(0,0,0,.28),0 1px 1px rgba(0,0,0,.25)">'+n+'</span>';
- let h='<div class="plate-medals" style="display:flex;gap:3px;margin-top:5px">';
- if(c.gold) h+=pip('#cf9c1f',c.gold,'gold'); if(c.silver) h+=pip('#9aa3ad',c.silver,'silver'); if(c.bronze) h+=pip('#2f5fd0',c.bronze,'bronze (royal blue)');
- return h+'</div>';
+ const c={gold:0,silver:0,bronze:0}; (list||[]).forEach(m=>{ if(c[m.kind]!=null) c[m.kind]++; });
+ const pip=(col,n,ti)=>'<span title="'+ti+'" style="display:inline-grid;place-items:center;width:16px;height:16px;border-radius:50%;font:700 9px/1 system-ui;'+
+   (n>0?'background:'+col+';color:#fff;box-shadow:inset 0 -2px 2px rgba(0,0,0,.28),0 1px 1px rgba(0,0,0,.2)'
+       :'background:transparent;border:1.5px dashed '+col+';color:'+col+';opacity:.5')+'">'+n+'</span>';
+ return '<div class="plate-medals" style="display:flex;gap:4px;align-items:center;margin-top:6px">'+
+   '<span style="font:700 9px/1 system-ui;letter-spacing:.06em;text-transform:uppercase;color:#9a96a3;margin-right:1px">Medals</span>'+
+   pip('#cf9c1f',c.gold,'gold medals')+pip('#9aa3ad',c.silver,'silver medals')+pip('#2f5fd0',c.bronze,'bronze · royal blue medals')+'</div>';
+}
+function ramStick(col,n,ti){
+ // a tiny RAM-stick glyph: a chip body with notch + contact pins; faint & outlined at 0
+ const on=n>0, body=on?col:'transparent', edge=on?'rgba(0,0,0,.25)':col, ink=on?'#fff':col;
+ return '<span title="'+ti+'" style="position:relative;display:inline-grid;grid-template-columns:repeat(6,1fr);align-items:end;'+
+   'width:26px;height:15px;padding:2px 2px 0;border:1.5px '+(on?'solid':'dashed')+' '+edge+';border-radius:3px 3px 1px 1px;'+
+   'background:'+body+';opacity:'+(on?1:.5)+';box-sizing:border-box;'+(on?'box-shadow:0 1px 1px rgba(0,0,0,.2)':'')+'">'+
+   '<i style="grid-column:1/7;height:5px;border-radius:1px;background:'+(on?'rgba(255,255,255,.28)':'transparent')+'"></i>'+
+   [0,0,0,0,0,0].map(()=>'<i style="height:3px;margin:1px .5px 0;border-radius:0 0 1px 1px;background:'+(on?'rgba(0,0,0,.35)':edge)+'"></i>').join('')+
+   '<b style="position:absolute;inset:0;display:grid;place-items:center;font:800 9px/1 system-ui;color:'+ink+';text-shadow:'+(on?'0 1px 1px rgba(0,0,0,.35)':'none')+'">'+n+'</b></span>';
+}
+function ramPips(ram){
+ const r=ram||{gold:0,silver:0,bronze:0};
+ return '<div class="ram-sticks" style="display:flex;gap:5px;align-items:center;margin-top:5px">'+
+   '<span style="font:700 9px/1 system-ui;letter-spacing:.06em;text-transform:uppercase;color:#7fd4ff;margin-right:1px">RAM</span>'+
+   ramStick('#cf9c1f',r.gold,'gold RAM sticks — months its return would have finished #1')+
+   ramStick('#9aa3ad',r.silver,'silver RAM sticks — months it would have finished #2')+
+   ramStick('#2f5fd0',r.bronze,'blue RAM sticks — months it would have finished #3')+'</div>';
 }
 function render(st,priceByMid,snaps){
- try{ MED=monthlyMedals(st); }catch(e){ MED={byId:{},hall:{},curLeader:null}; }
+ try{ MED=monthlyMedals(st); }catch(e){ MED={byId:{},hall:{},curLeader:null,computer:null}; }
  const R=rows(st).sort((a,b)=>b.balance-a.balance);
  const Rmain=R.filter(t=>t.tier!=='warehouse'), Rwh=R.filter(t=>t.tier==='warehouse');
  const dEl=document.getElementById('day'); if(dEl){ const dn=Math.round((new Date(etToday())-new Date(st.start_date))/864e5)+1; dEl.textContent=dn>0?dn:1; }
