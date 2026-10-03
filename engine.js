@@ -31,24 +31,25 @@ const META=[
 const METABY={}; META.forEach(m=>METABY[m.id]=m);
 
 const ROSTER={
- jim:{prim:'favorite',min_p:.90,max_pos:3,day_frac:.20,size_mult:2},   // the closer — bets big on sure things
- dwight:{prim:'momentum',min_chg:.03,max_pos:2,day_frac:.25},
- pam:{prim:'meanrev',min_chg:.05,max_pos:3,day_frac:.12},
- andy:{prim:'crowd',top_volume:20,max_pos:3,day_frac:.18},
- stanley:{prim:'nearcert',min_p:.93,max_pos:2,day_frac:.10,size_mult:2},   // graduated — proven, bets bigger
- phyllis:{prim:'value',min_p:.60,max_p:.85,max_pos:4,day_frac:.15},
- ryan:{prim:'hypenew',max_pos:2,day_frac:.30,oversize:true},
- michael:{prim:'fade',max_pos:2,day_frac:.30,size_mult:1.5},   // contrarian "genius" — bets against the crowd, big
- oscar:{prim:'ev',min_p:.6,max_spread:.03,max_pos:3,day_frac:.18},
- kevin:{prim:'naive',max_pos:3,day_frac:.20},
- angela:{prim:'nearcert',min_p:.95,max_pos:2,day_frac:.06,size_mult:2},   // graduated — spotless run, bets bigger
- creed:{prim:'random',max_pos:3,day_frac:.20},
- meredith:{prim:'longshot',max_p:.12,max_pos:1,day_frac:.30,oversize:true},
- kelly:{prim:'crowd',top_volume:40,max_pos:3,day_frac:.18},
- gabe:{prim:'favorite',min_p:.80,top_volume:15,max_pos:4,day_frac:.15},
- darryl:{prim:'value',min_p:.55,max_p:.90,max_pos:3,day_frac:.18},
- erin:{prim:'favorite',tags:['sport','soccer','nfl','nba','weather','epl','game','win','vs'],min_p:.75,max_pos:2,day_frac:.12},
- toby:{prim:'nearcert',min_p:.96,max_pos:1,day_frac:.05,size_mult:2},   // graduated — zero losses, bets bigger
+ // each trader owns a market lane (cat) + a distinct signal/band so they rarely hold the same thing
+ jim:{prim:'favorite',cat:'crypto',min_p:.92,max_pos:3,day_frac:.20,size_mult:2},     // crypto blue-chips — the sure coins
+ dwight:{prim:'momentum',cat:'crypto',min_chg:.03,max_pos:2,day_frac:.25},            // rides the biggest crypto mover
+ pam:{prim:'meanrev',cat:'enter',min_chg:.05,max_pos:3,day_frac:.12},                 // buys the dip on pop-culture markets
+ andy:{prim:'crowd',cat:'sports',max_pos:3,day_frac:.18},                             // piles into the big game by volume
+ stanley:{prim:'nearcert',cat:'econ',min_p:.93,max_pos:2,day_frac:.10,size_mult:2},   // proven — safe econ prints
+ phyllis:{prim:'value',cat:'politics',min_p:.60,max_p:.85,max_pos:4,day_frac:.15},    // patient value on political markets
+ ryan:{prim:'hypenew',cat:'enter',max_pos:2,day_frac:.30,oversize:true},              // newest viral market, big & fast
+ michael:{prim:'fade',cat:'politics',max_pos:2,day_frac:.30,size_mult:1.5},           // contrarian on politics — big
+ oscar:{prim:'ev',cat:'econ',min_p:.6,max_spread:.03,max_pos:3,day_frac:.18},         // EV plays on the economy, tight spread
+ kevin:{prim:'naive',cat:'crypto',min_p:.60,max_p:.82,max_pos:3,day_frac:.20},        // the merely-likely coin (not jim's chalk)
+ angela:{prim:'nearcert',cat:'econ',min_p:.95,max_pos:2,day_frac:.06,size_mult:2},    // spotless — the surest econ locks
+ creed:{prim:'random',cat:'crypto',max_pos:3,day_frac:.20},                           // erratic crypto — no system
+ meredith:{prim:'longshot',cat:'sports',min_p:.60,max_p:.88,max_pos:1,day_frac:.30,oversize:true},  // one big swing on a live game
+ kelly:{prim:'crowd',cat:'enter',max_pos:3,day_frac:.18},                             // pop-culture buzz — whatever's trending
+ gabe:{prim:'favorite',cat:'world',min_p:.80,max_pos:4,day_frac:.15},                 // macro / world favorites
+ darryl:{prim:'value',cat:'sports',min_p:.55,max_p:.78,max_pos:3,day_frac:.18},       // best-value game contracts
+ erin:{prim:'favorite',cat:'sports',min_p:.80,max_pos:2,day_frac:.12},                // the chalk on the games she follows
+ toby:{prim:'nearcert',cat:'world',min_p:.96,max_pos:1,day_frac:.05,size_mult:2},     // the very surest world near-locks
 };
 const IDS=Object.keys(ROSTER);
 /* ---- The Warehouse (2nd tier): a washed-out bot restarts at $1,000 with its
@@ -104,31 +105,47 @@ const ask_of=(s,side)=> side==='YES'? s.ask : 1-s.bid;
 const fee=(s,p,shares)=> s.fee_rate*Math.pow(Math.min(p,1-p),s.fee_exp)*shares;
 
 function isnew(s){ try{ return (Date.now()-new Date(s.created).getTime())/864e5 <= 3; }catch(e){ return false; } }
+/* ---- category lanes + personality seed: keep traders in their own markets, and out of lockstep ---- */
+const JIT=0.30;   // per-trader score jitter — spreads same-signal traders onto different markets
+const CATWORDS={
+ crypto:['bitcoin','btc','ethereum',' eth','solana',' sol ','xrp','ripple','dogecoin','doge','bnb','crypto','blockchain','nft','coinbase','litecoin','cardano','ada '],
+ sports:['nfl','nba','mlb','nhl','soccer','epl','premier league','ufc','formula','f1 ','tennis','golf',' vs ','match','playoff','champion','world cup',' cup','series','touchdown','goalscorer',' game','defeat','beat '],
+ politics:['election','president','senate','congress',' vote','governor','primary','democrat','republic','parliament','prime minister','shutdown','nominee','confirm','impeach','approval','poll '],
+ econ:['fed ','federal reserve','interest rate','rate cut','rate hike','cpi','inflation','jobs report','nonfarm','unemployment','gdp','recession','fomc','powell','treasury','yield'],
+ enter:['box office','movie','oscar','grammy','emmy','award','album','billboard','spotify','netflix','season','episode','celebrity','rotten tomatoes','#1','box-office'],
+ weather:['temperature','weather','rain','snow','hurricane','storm','degrees','high temp','tornado','heat index'],
+ world:['war','ceasefire','nato',' u.n','missile','border','treaty','summit','nuclear','israel','ukraine','russia','china','iran','gaza','geopolit','sanction'],
+};
+function marketCat(s){ const t=' '+((s&&s.text)||'')+' '; let best='other',bn=0;
+ for(const c in CATWORDS){ let n=0; const ws=CATWORDS[c]; for(let i=0;i<ws.length;i++) if(t.indexOf(ws[i])>=0) n++; if(n>bn){bn=n;best=c;} }
+ return best; }
+function seed01(str){ let h=2166136261>>>0; for(let i=0;i<str.length;i++){ h^=str.charCodeAt(i); h=Math.imul(h,16777619); } return (h>>>0)/4294967295; }
 function score(prim,s,side,cfg){
  const p=price(s,side), chg= side==='YES'? s.change : -s.change;
  switch(prim){
   case 'favorite': return p>=(cfg.min_p||.90)? p : -1;
   case 'nearcert': return p>=(cfg.min_p||.93)? p : -1;
-  case 'longshot': return (p>=.60)? p : -1;          // meredith: still goes big — now on a live favorite
+  case 'longshot': return (p>=(cfg.min_p||.55)&&p<=(cfg.max_p||.85))? p : -1;   // meredith: one big swing on a live favorite (not the chalk)
   case 'momentum': return chg>(cfg.min_chg||.02)? chg*Math.log1p(s.vol) : -1;
   case 'meanrev': return (Math.abs(s.change)>(cfg.min_chg||.05)&&chg<0&&p>=.50)? -chg : -1;   // pam: buy the dip, but only on favored sides
   case 'crowd': return (p>=.62)? s.vol : -1;          // andy/kelly: pile into the clear crowd favorites
   case 'hypenew': return (isnew(s)&&side==='YES'&&p>=.55)? s.vol : -1;   // ryan: new hotness, but the favored side
   case 'ev': { const cost=ask_of(s,side); return (p>=(cfg.min_p||.6) && (p-cost)>=-(cfg.max_spread||.03))? p : -1; }  // disciplined: favored side, tight spread (low vig)
   case 'value': return (p>=(cfg.min_p||.60)&&p<=(cfg.max_p||.88))? p : -1;   // phyllis/darryl: solid favorites at a fair price
-  case 'naive': return (p>=.60)? p : -1;   // backs the obvious favorite — simple, but competitive
+  case 'naive': return (p>=(cfg.min_p||.60)&&p<=(cfg.max_p||.90))? p : -1;   // kevin: the merely-likely coin, not jim's chalk
   case 'fade': return (p>=.58)? s.vol : -1;          // michael: big, confident bets on the obvious favorite
   case 'random': return (p>=.55)? Math.random()*p : -1;   // creed: erratic which favorite — but still a favorite
  }
  return -1;
 }
 function decide(id,snaps,flip){
- const base=ROSTER[id]; const cfg=flip? Object.assign({},base,REVERSE[base.prim]||{}) : base; let pool=snaps;
- if(cfg.tags) pool=pool.filter(s=>cfg.tags.some(t=>s.text.indexOf(t)>=0));
- if(cfg.top_volume) pool=pool.slice().sort((a,b)=>b.vol-a.vol).slice(0,cfg.top_volume);
+ const base=ROSTER[id]; const cfg=flip? Object.assign({},base,REVERSE[base.prim]||{}) : base;
  const cands=[];
- pool.forEach(s=>['YES','NO'].forEach(side=>{ const v=score(cfg.prim,s,side,cfg); if(v>0) cands.push([v,s,side]); }));
- cands.sort((a,b)=>b[0]-a[0]);
+ snaps.forEach(s=>['YES','NO'].forEach(side=>{ let v=score(cfg.prim,s,side,cfg); if(v>0){
+   v*=(1+(seed01(id+'|'+s.id)-0.5)*2*JIT);                              // personality seed — same-signal traders land on different markets
+   const lane=cfg.cat?(marketCat(s)===cfg.cat?2:(cfg.cat2&&marketCat(s)===cfg.cat2?1:0)):0;
+   cands.push([v,s,side,lane]); } }));
+ cands.sort((a,b)=>(b[3]-a[3])||(b[0]-a[0]));                           // own lane first, then jittered score (spills to other lanes only when its own is thin)
  const picks=(cfg.oversize? cands.slice(0,1) : cands.slice(0,cfg.max_pos||3));
  return picks.map(x=>[x[1],x[2]]);
 }
